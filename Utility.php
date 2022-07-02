@@ -234,6 +234,11 @@ class ActiveRecordOf extends ActiveRecord {
     }
 }
 
+// Const ToGo
+const TG_Get = "TG_Get";
+const TG_Post = "TG_Post";
+const TG_PostForm = "TG_PostForm";
+
 /**
  * HtmlOf
  *
@@ -247,49 +252,60 @@ class ActiveRecordOf extends ActiveRecord {
 class HtmlOf {
 
     public function GetFormToken() {
-        return '<input type="hidden" name="_csrf" value="' . Yii::$app->request->getCsrfToken() . '"/>';
+        return Html::hiddenInput('_csrf', Yii::$app->request->getCsrfToken());
     }
 
-    public function ToGo($AValue, $AUrl, $AParam = null, $AType = 'link', $AClass = null, $APost = true, $AHttps = false) {
+    public function ToGo($AValue, $AUrl, $AParam = null, $AType = 'link', $AClass = null, $APost = TG_Get, $AHttps = false) {
         $FResult = CH_FREE;
         if (!ALGOL::StrOf()->Empty([$AValue, $AUrl])) {
             // Get Param
             $FValue = Html::encode($AValue);
             $FUrl = [$AUrl];
-            if ($AHttps) $FUrl[] = 'https';
             $FOptions = [];
             if (!is_null($AClass)) $FOptions['class'] = $AClass;
-            // Check post
-            if ($APost) {
-                //$FOptions['data-method'] = 'POST';
-                $FOptions['onclick'] = 'this.parentNode.submit();';
-                //if (!is_null($AParam)) $FOptions['data-params'] = $AParam;
-            } else {
-                $FUrl = ALGOL::ArrayOf()->Of(AO_Merge, $FUrl, $AParam);
-            }
-            // Check url
-            if (ALGOL::StrOf()->Same($AUrl, 'home')) {
-                $FUrl = \yii\helpers\Url::home();
-            } elseif (ALGOL::StrOf()->Same($AUrl, 'current')) {
-                $FUrl = \yii\helpers\Url::current();
-            } else {
-                $FUrl = \yii\helpers\Url::to($FUrl);
-            }
-            // Check type
-            if (ALGOL::StrOf()->Same($AType, 'link')) {
-                $FResult = Html::a($FValue, $FUrl, $FOptions);
-            } elseif (ALGOL::StrOf()->Same($AType, 'mailto')) {
-                $FResult = Html::mailto($FValue, $FUrl, $FOptions);
-            } elseif (ALGOL::StrOf()->Same($AType, 'button')) {
-                $FResult = Html::button($FValue, $FOptions);
-            } elseif (ALGOL::StrOf()->Same($AType, 'submit')) {
-                $FResult = Html::submitButton($FValue, $FOptions);
-            } elseif (ALGOL::StrOf()->Same($AType, 'reset')) {
-                $FResult = Html::resetButton($FValue, $FOptions);
-            }
             // Check Post
-            if ($APost) {
-                //$FResult = Html::beginForm()
+            if ($APost === TG_PostForm) {
+                $FResult = Html::beginForm($FUrl, 'post', ['id' => 1]);
+                if (ALGOL::ArrayOf()->Empty($AParam)) {
+                    $FResult .= html::hiddenInput(ALGOL::DefaultOf()->ValueCheck(ALGOL::ArrayOf()->First($AParam), 'default'), $FValue);
+                } else {
+                    foreach ($AParam as $FKey => $FItem) {
+                        $FResult .= html::hiddenInput($FKey, $FItem);
+                    }
+                }
+                $FOptions['onclick'] = 'this.parentNode.submit();';
+                $FResult .= Html::endForm() .
+                    Html::a($FValue, null, $FOptions);
+            } else {
+                // Get Param
+                if ($AHttps) $FUrl[] = 'https';
+                // Check post
+                if ($APost === TG_Post) {
+                    $FOptions['data-method'] = 'POST';
+                    if (!is_null($AParam)) $FOptions['data-params'] = $AParam;
+                } else {
+                    $FUrl = ALGOL::ArrayOf()->Of(AO_Merge, $FUrl, $AParam);
+                }
+                // Check url
+                if (ALGOL::StrOf()->Same($AUrl, 'home')) {
+                    $FUrl = \yii\helpers\Url::home();
+                } elseif (ALGOL::StrOf()->Same($AUrl, 'current')) {
+                    $FUrl = \yii\helpers\Url::current();
+                }/* else {
+                $FUrl = \yii\helpers\Url::to($FUrl);
+            }*/
+                // Check type
+                if (ALGOL::StrOf()->Same($AType, 'link')) {
+                    $FResult = Html::a($FValue, $FUrl, $FOptions);
+                } elseif (ALGOL::StrOf()->Same($AType, 'mailto')) {
+                    $FResult = Html::mailto($FValue, $AUrl, $FOptions);
+                } elseif (ALGOL::StrOf()->Same($AType, 'button')) {
+                    $FResult = Html::button($FValue, $FOptions);
+                } elseif (ALGOL::StrOf()->Same($AType, 'submit')) {
+                    $FResult = Html::submitButton($FValue, $FOptions);
+                } elseif (ALGOL::StrOf()->Same($AType, 'reset')) {
+                    $FResult = Html::resetButton($FValue, $FOptions);
+                }
             }
         }
         return $FResult;
