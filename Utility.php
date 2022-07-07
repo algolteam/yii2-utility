@@ -265,7 +265,7 @@ class HtmlOf {
             if (!is_null($AClass)) $FOptions['class'] = $AClass;
             // Check Post
             if ($APost === TG_PostForm) {
-                $FName = 'form' . (int)ALGOL::Html5Of()->Count(__FILE__, 'form');
+                $FName = ALGOL::FakerOf()->Faker->numerify('form-###');
                 $FResult = Html::beginForm($FUrl, 'post', ['id' => $FName]);
                 if (ALGOL::ArrayOf()->Empty($AParam)) {
                     $FResult .= html::hiddenInput(ALGOL::DefaultOf()->ValueCheck(ALGOL::ArrayOf()->First($AParam), 'default'), $FValue, ['form' => $FName]);
@@ -274,10 +274,9 @@ class HtmlOf {
                         $FResult .= html::hiddenInput($FKey, $FItem, ['form' => $FName]);
                     }
                 }
-                $FOptions['onclick'] = 'this.parentNode.submit();';
+                $FOptions['onclick'] = 'document.getElementById("' . $FName . '").submit();'; //'this.parentNode.submit();';
                 $FOptions['form'] = $FName;
-                $FResult .= Html::endForm() .
-                    Html::a($FValue, null, $FOptions);
+                $FResult .= Html::endForm() . Html::a($FValue, null, $FOptions);
             } else {
                 // Get Param
                 if ($AHttps) $FUrl[] = 'https';
