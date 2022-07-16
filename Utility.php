@@ -14,6 +14,8 @@ use yii\helpers\Html;
 use yii\helpers\Json;
 use yii\helpers\VarDumper;
 use yii\web\AssetBundle;
+use yii\helpers\Url;
+use yii\helpers\ArrayHelper;
 
 /**
  * ALGOL_YII
@@ -56,6 +58,13 @@ class ALGOL_YII {
     public static function GridColumnExpandOf() {
         return GridColumnExpandOf::class;
     }
+
+    /**
+     * @return ModalOf
+     */
+    public static function ModalOf() {
+        return new ModalOf();
+    }
 }
 
 /**
@@ -76,7 +85,7 @@ class AppOf {
     public function GetIP() {
         $FResult = Yii::$app->getRequest()->getUserIP();
         if (!isset($FResult)) {
-            $FResult = ALGOL::SystemOf()->Values();
+            $FResult = (new SystemOf)->Values();
             if (isset($FResult['Network']['IPv4 Address'])) $FResult = $FResult['Network']['IPv4 Address']; else $FResult = '127.0.0.1';
         }
         return $FResult;
@@ -147,7 +156,7 @@ class ActiveRecordOf extends ActiveRecord {
             foreach ($FSubResult as $FValue) {
                 $FValueUp = trim((new StrOf)->CharCase($FValue, MB_CASE_UPPER));
                 if (in_array($FValueUp, [CH_AND_TEXT, CH_OR_TEXT])) $FResult = [$FValueUp];
-                elseif (in_array($FValueUp, self::C_MYSQL_OPERATORS)) $FOperant = $FValueUp;
+                elseif (in_array($FValueUp, $this->C_MYSQL_OPERATORS)) $FOperant = $FValueUp;
                 elseif ($FValueUp == CH_NOT_TEXT) $FNot = CH_NOT_TEXT; else $FFieldName = $FValue;
             }
         }
@@ -178,7 +187,7 @@ class ActiveRecordOf extends ActiveRecord {
     }
 
     public function Builder($ATableNames, $AColumns = null, $AJoins = null, $AWheres = null, $AGroups = null, $AHavings = null, $AOrders = null, $ALimit = null, $ACond = CH_AND_TEXT, Query $AQuery = null) {
-        if (isset($AQuery)) $FResult = $AQuery; else $FResult = self::useTable($ATableNames)::find();
+        if (isset($AQuery)) $FResult = $AQuery; else $FResult = $this->useTable($ATableNames)::find();
         if ($FResult instanceof Query) $FResult->from($ATableNames);
         if (isset($AColumns)) $FResult->select($AColumns);
         if (isset($AJoins)) $this->JoinOf($AJoins, $FResult);
@@ -197,7 +206,7 @@ class ActiveRecordOf extends ActiveRecord {
         return $this->Builder($ATableNames, $AColumns, $AJoins, $AWheres, $AGroups, $AHavings, $AOrders, $ALimit, $ACond, new Query());
     }
 
-    public function Filter($ATableName, $AValues, &$AResult, $AColumns = "*", $ANumRows = null, $AFormat = null, $AFormatClearSubArray = true, $AValueFromString = null, $AOrder = null, $AGroup = null, $AJoin = null, $AJSONParseField = null, $ACond = CH_AND_TEXT) {
+    public function Filter($ATableName, $AValues, &$AResult, $AColumns = "*", $ANumRows = null, $AFormat = null, $AFormatClearSubArray = true, $AOrder = null, $AGroup = null, $AJoin = null, $AJSONParseField = null, $ACond = CH_AND_TEXT) {
         $AResult = null;
         $FResult = $this->Builder($ATableName, $AColumns, $AJoin, $AValues, $AGroup, null, $AOrder, $ANumRows, $ACond);
         if ($FResult) {
@@ -207,14 +216,7 @@ class ActiveRecordOf extends ActiveRecord {
                 if ((new StrOf)->Length($AJSONParseField) > 0) $AResult = (new ArrayOf)->FromJSON($AResult, $AJSONParseField);
                 // Get format
                 if (($ANumRows <> 1) and !is_null($AFormat)) {
-                    foreach ($AResult as $FKey => $FValue) {
-                        if (is_array($FValue)) {
-                            $AResult[$FKey] = (new StrOf)->Replace($AFormat, array_keys($FValue), array_values($FValue));
-                            if ((new DefaultOf)->TypeCheck($FKey)) $AResult[$FKey] = (new StrOf)->Replace($AResult[$FKey], CH_NUMBER, $FKey + 1);
-                            if (($AValueFromString === true) or ((new ArrayOf)->Length($AValueFromString) > 0)) $AResult[$FKey] = (new DefaultOf)->ValueFromString($AResult[$FKey], (new DefaultOf)->ValueCheck($AValueFromString[0], 2), (new DefaultOf)->ValueCheck($AValueFromString[1], CH_FREE));
-                            if (!$AFormatClearSubArray) $AResult[$FKey] = [$AResult[$FKey]];
-                        }
-                    }
+                    (new ArrayOf)->FromFormat($AResult, $AFormat, $AResult, CH_FREE, CH_FREE, $AFormatClearSubArray);
                 }
             }
         }
@@ -222,22 +224,87 @@ class ActiveRecordOf extends ActiveRecord {
     }
 
     public function FilterOne($ATableName, $AValues, &$AResult, $AColumns = "*", $AOrder = null, $AGroup = null, $AJoin = null, $AJSONParseField = null, $ACond = CH_AND_TEXT) {
-        return $this->Filter($ATableName, $AValues, $AResult, $AColumns, 1, null, true, null, $AOrder, $AGroup, $AJoin, $AJSONParseField, $ACond);
+        return $this->Filter($ATableName, $AValues, $AResult, $AColumns, 1, null, true, $AOrder, $AGroup, $AJoin, $AJSONParseField, $ACond);
     }
 
     public function Append($ATableName, $AValues, &$AResult) {
-        $AResult = self::useTable($ATableName);
+        $AResult = $this->useTable($ATableName);
         foreach ($AValues as $FKey => $FValue) {
             $AResult->setAttribute($FKey, $FValue);
         }
         return $AResult->save();
     }
+
+    private function Execute($ASqlQuery, &$AResult, $AValues = null) {
+        $AResult = null;
+        if (!(new StrOf)->Empty($ASqlQuery)) {
+            $FValues = null;
+            $FQuery = $ASqlQuery;
+            if (!(new ArrayOf)->Empty($AValues)) {
+                foreach ($AValues as $FKey => $FValue) {
+                    if ((new StrOf)->Pos($FQuery, CH_MONEY . $FKey) > 0) {
+                        $FValues[CH_POINT_TWO_VER . $FKey] = $FValue;
+                    } elseif ((new StrOf)->FoundWord($FQuery, $FKey)) {
+                        $FValues[CH_POINT_TWO_VER . $FKey] = $FValue;
+                        $FQuery = (new StrOf)->Replace($FQuery, $FKey, CH_POINT_TWO_VER . $FKey);
+                    }
+                }
+            }
+            if (is_null($FValues)) $AResult = Yii::$app->db->createCommand($FQuery); else $AResult = Yii::$app->db->createCommand((new StrOf)->Replace($FQuery, CH_MONEY, CH_POINT_TWO_VER), $FValues);
+        }
+        return (bool)$AResult;
+    }
+
+    public function SqlToAll($ASqlQuery, &$AResult, $AValues = null) {
+        if ($this->Execute($ASqlQuery, $AResult, $AValues)) {
+            $AResult = $AResult->queryAll();
+        }
+        return (bool)$AResult;
+    }
+
+    public function SqlToOne($ASqlQuery, &$AResult, $AValues = null) {
+        if ($this->Execute($ASqlQuery, $AResult, $AValues)) {
+            $AResult = $AResult->queryOne();
+        }
+        return (bool)$AResult;
+    }
+
+    public function SqlToColumn($ASqlQuery, &$AResult, $AValues = null) {
+        if ($this->Execute($ASqlQuery, $AResult, $AValues)) {
+            $AResult = $AResult->queryColumn();
+        }
+        return (bool)$AResult;
+    }
+
+    public function SqlToScalar($ASqlQuery, &$AResult, $AValues = null) {
+        if ($this->Execute($ASqlQuery, $AResult, $AValues)) {
+            $AResult = $AResult->queryScalar();
+        }
+        return (bool)$AResult;
+    }
+
+    public function SqlToExecute($ASqlQuery, &$AResult, $AValues = null) {
+        if ($this->Execute($ASqlQuery, $AResult, $AValues)) {
+            $AResult = $AResult->execute();
+        }
+        return (bool)$AResult;
+    }
+
 }
 
 // Const ToGo
-const TG_Get = "TG_Get";
-const TG_Post = "TG_Post";
-const TG_PostForm = "TG_PostForm";
+const TGT_Link = "TGT_Link";
+const TGT_Mail = "TGT_Mail";
+const TGT_Submit = "TGT_Submit";
+const TGT_Reset = "TGT_Reset";
+const TGT_DataPost = "TGT_DataPost";
+const TGT_FormPost = "TGT_FormPost";
+
+// Const Get Array Of
+const AA_SqlAll = "AA_SqlAll";
+const AA_SqlOne = "AA_SqlOne";
+const AA_SqlCount = "AA_SqlCount";
+const AA_Url = "AA_Url";
 
 /**
  * HtmlOf
@@ -255,61 +322,157 @@ class HtmlOf {
         return Html::hiddenInput('_csrf', Yii::$app->request->getCsrfToken());
     }
 
-    public function ToGo($AValue, $AUrl, $AParam = null, $AType = 'link', $AClass = null, $APost = TG_Get, $AHttps = false) {
+    public function ToGo($AValue, $AUrl, $AData = null, $AType = TGT_Link, $AClass = null, $AHttps = false) {
         $FResult = CH_FREE;
-        if (!ALGOL::StrOf()->Empty([$AValue, $AUrl])) {
+        if (!(new StrOf)->Empty([$AValue, $AUrl])) {
             // Get Param
-            $FValue = Html::encode($AValue);
+            $FValue = $AValue;
             $FUrl = [$AUrl];
             $FOptions = [];
             if (!is_null($AClass)) $FOptions['class'] = $AClass;
             // Check Post
-            if ($APost === TG_PostForm) {
-                $FName = ALGOL::FakerOf()->Faker->numerify('form-###');
-                $FResult = Html::beginForm($FUrl, 'post', ['id' => $FName]);
-                if (ALGOL::ArrayOf()->Empty($AParam)) {
-                    $FResult .= html::hiddenInput(ALGOL::DefaultOf()->ValueCheck(ALGOL::ArrayOf()->First($AParam), 'default'), $FValue, ['form' => $FName]);
-                } else {
-                    foreach ($AParam as $FKey => $FItem) {
-                        $FResult .= html::hiddenInput($FKey, $FItem, ['form' => $FName]);
+            if ($AType === TGT_FormPost) {
+                $FResult = Html::beginForm($FUrl, 'post', ['class' => 'form-inline']);
+                if (!is_null($AData)) {
+                    foreach ($AData as $FKey => $FItem) {
+                        $FResult .= html::hiddenInput($FKey, $FItem);
                     }
                 }
-                $FOptions['onclick'] = 'document.getElementById("' . $FName . '").submit();'; //'this.parentNode.submit();';
-                $FOptions['form'] = $FName;
-                $FResult .= Html::endForm() . Html::a($FValue, null, $FOptions);
+                $FResult .= Html::submitButton($FValue, $FOptions) . Html::endForm();
             } else {
                 // Get Param
                 if ($AHttps) $FUrl[] = 'https';
                 // Check post
-                if ($APost === TG_Post) {
+                if ($AType === TGT_DataPost) {
                     $FOptions['data-method'] = 'POST';
-                    if (!is_null($AParam)) $FOptions['data-params'] = $AParam;
+                    if (!is_null($AData)) $FOptions['data-params'] = $AData;
                 } else {
-                    $FUrl = ALGOL::ArrayOf()->Of(AO_Merge, $FUrl, $AParam);
+                    $FUrl = (new ArrayOf)->Of(AO_Merge, $FUrl, $AData);
                 }
                 // Check url
-                if (ALGOL::StrOf()->Same($AUrl, 'home')) {
-                    $FUrl = \yii\helpers\Url::home();
-                } elseif (ALGOL::StrOf()->Same($AUrl, 'current')) {
-                    $FUrl = \yii\helpers\Url::current();
-                }/* else {
-                $FUrl = \yii\helpers\Url::to($FUrl);
-            }*/
+                switch ($AType) {
+                    case 'home':
+                        $FUrl = Url::home();
+                        break;
+                    case 'current':
+                        $FUrl = Url::current();
+                        break;
+                }
                 // Check type
-                if (ALGOL::StrOf()->Same($AType, 'link')) {
-                    $FResult = Html::a($FValue, $FUrl, $FOptions);
-                } elseif (ALGOL::StrOf()->Same($AType, 'mailto')) {
-                    $FResult = Html::mailto($FValue, $AUrl, $FOptions);
-                } elseif (ALGOL::StrOf()->Same($AType, 'button')) {
-                    $FResult = Html::button($FValue, $FOptions);
-                } elseif (ALGOL::StrOf()->Same($AType, 'submit')) {
-                    $FResult = Html::submitButton($FValue, $FOptions);
-                } elseif (ALGOL::StrOf()->Same($AType, 'reset')) {
-                    $FResult = Html::resetButton($FValue, $FOptions);
+                switch ($AType) {
+                    case TGT_Mail:
+                        $FResult = Html::mailto($FValue, $AUrl, $FOptions);
+                        break;
+                    case TGT_Button:
+                        $FResult = Html::button($FValue, $FOptions);
+                        break;
+                    case TGT_Submit:
+                        $FResult = Html::submitButton($FValue, $FOptions);
+                        break;
+                    case TGT_Reset:
+                        $FResult = Html::resetButton($FValue, $FOptions);
+                        break;
+                    default:
+                        $FResult = Html::a($FValue, $FUrl, $FOptions);
+                        break;
                 }
             }
         }
         return $FResult;
+    }
+
+    public function FromAction($AValues, $AParam) {
+        if ((new StrOf)->Found($AParam, [AA_SqlAll, AA_SqlOne, AA_SqlCount, AA_Url])) {
+            $FResult = $AValues;
+            if (!(new ArrayOf)->Empty($FResult) and !(new ArrayOf)->Empty($AParam) and isset($AParam['action']) and isset($AParam['name'])) {
+                $FAction = $AParam['action'];
+                $FName = $AParam['name'];
+                switch ($FAction) {
+                    case AA_SqlAll:
+                        $FDefault = (new DefaultOf)->ValueCheck($AParam['default'], CH_FREE);
+                        $FQuery = (new StrOf)->Replace((new DefaultOf)->ValueCheck($AParam['query'], CH_FREE), array_keys($FResult), array_values($FResult));
+                        $FData = (new ArrayOf)->Of(AO_Merge, $FResult, $AParam['data']);
+                        if ((new ActiveRecordOf)->SqlToAll($FQuery, $FSubResult, $FData)) {
+                            if (isset($AParam['format'])) {
+                                $FResult[$FName] = $this->FromArray($FSubResult, $AParam['format'], $FDefault, $AParam['interval']);
+                            } elseif (!(new ArrayOf)->Empty($FSubResult)) {
+                                $FResult[$FName] = (new ArrayOf)->ToString($FSubResult, (new DefaultOf)->ValueCheck($AParam['interval'], CH_COMMA . CH_SPACE));
+                            } else $FResult[$FName] = $FDefault;
+                        } else $FResult[$FName] = $FDefault;
+                        break;
+                    case AA_SqlOne:
+                        $FDefault = (new DefaultOf)->ValueCheck($AParam['default'], CH_FREE);
+                        $FQuery = (new StrOf)->Replace((new DefaultOf)->ValueCheck($AParam['query'], CH_FREE), array_keys($FResult), array_values($FResult));
+                        $FData = (new ArrayOf)->Of(AO_Merge, $FResult, $AParam['data']);
+                        if ((new ActiveRecordOf)->SqlToOne($FQuery, $FSubResult, $FData)) {
+                            if (isset($AParam['format'])) {
+                                $FResult[$FName] = (new StrOf)->Replace($AParam['format'], array_keys($FSubResult), array_values($FSubResult));
+                            } elseif (!(new ArrayOf)->Empty($FSubResult)) {
+                                $FResult[$FName] = (new ArrayOf)->ToString($FSubResult, (new DefaultOf)->ValueCheck($AParam['interval'], CH_COMMA . CH_SPACE));
+                            } else $FResult[$FName] = $FDefault;
+                        } else $FResult[$FName] = $FDefault;
+                        break;
+                    case AA_SqlCount:
+                        $FDefault = (new DefaultOf)->ValueCheck($AParam['default'], CH_FREE);
+                        $FQuery = (new StrOf)->Replace((new DefaultOf)->ValueCheck($AParam['query'], CH_FREE), array_keys($FResult), array_values($FResult));
+                        $FData = (new ArrayOf)->Of(AO_Merge, $FResult, $AParam['data']);
+                        if ((new ActiveRecordOf)->SqlToExecute($FQuery, $FSubResult, $FData)) {
+                            if (isset($AParam['format'])) {
+                                $FResult[$FName] = (new StrOf)->Replace($AParam['format'], 'count', $FSubResult);
+                            } else $FResult[$FName] = $FDefault;
+                        } else $FResult[$FName] = $FDefault;
+                        break;
+                    case AA_Url:
+                        $FResult[$FName] = (new StrOf)->Replace(Url::to((new DefaultOf)->ValueCheck($AParam['url'], 'home')), array_keys($FResult), array_values($FResult));
+                        break;
+                }
+            }
+            return $FResult;
+        } else return (new ArrayOf)->FromAction($AValues, $AParam);
+    }
+
+    public function FromArray($AValues, $AFormat, $ADefault = CH_FREE, $AInterval = CH_FREE, $AParam = null) {
+        $FValues = $AValues;
+        if (!(new ArrayOf)->Empty($FValues) and !(new ArrayOf)->Empty($AParam)) {
+            foreach ($FValues as $FKey => $FValue) {
+                if (is_array($FValue)) {
+                    foreach ($AParam as $FParamValue) {
+                        $FValues[$FKey] = $this->FromAction($FValues[$FKey], $FParamValue);
+                    }
+                }
+            }
+        }
+        return (new ArrayOf)->FromFormat($FValues, $AFormat, $FResult, $ADefault, $AInterval);
+    }
+
+    public function CreateJsFunction($AElementID, $AEvent, $ACode, $AParam = null) {
+        $FArguments = null;
+        $FVariables = null;
+        $FCode = $ACode;
+        if ($AElementID[0] == CH_POINT) $FElementID = "'$AElementID'";
+        elseif (in_array($AElementID, ['window'])) $FElementID = $AElementID;
+        else $FElementID = "'#$AElementID'";
+        if (!(new ArrayOf)->Empty($AParam)) {
+            foreach ($AParam as $FVarName => $FElemID) {
+                if ((new StrOf)->Same($FElemID, 'arg')) {
+                    $FArguments = (new StrOf)->Add($FArguments, $FVarName, CH_COMMA, true);
+                } else {
+                    $FVariables = (new StrOf)->Add($FVariables, "   var $FVarName = document.getElementById('#$FElemID');", CH_NEW_LINE, true);
+                }
+            }
+            $FArguments = trim($FArguments);
+            $FVariables = trim($FVariables);
+        }
+        if (!(new ArrayOf)->Empty($ACode)) $FCode = (new ArrayOf)->ToString($FCode, CH_POINT_COMMA . CH_NEW_LINE, true, '   %s');
+        $FCode = (new StrOf)->Replace($FCode . CH_POINT_COMMA, CH_POINT_COMMA . CH_POINT_COMMA, CH_POINT_COMMA);
+        if (!(new StrOf)->Empty($FVariables)) $FCode = $FVariables . CH_NEW_LINE . $FCode;
+        $js = <<<JS
+$($FElementID).on('$AEvent', function($FArguments) {
+$FCode
+})
+
+JS;
+        return Yii::$app->getView()->registerJs($js, \yii\web\View::POS_END);
     }
 
 }
@@ -373,31 +536,31 @@ class GridColumnExpandOf extends DataColumn {
      */
     private function onClick(&$AResult, $model, $key, $index) {
         $AResult = null;
-        $FOnClick = ALGOL::ArrayOf()->FromFunction($this->onclick, $model, $key, $index);
-        if (ALGOL::ArrayOf()->Length($FOnClick) > 1) {
-            if (ALGOL::StrOf()->Length($FOnClick['value'], true) > 0) {
+        $FOnClick = (new ArrayOf)->FromFunction($this->onclick, $model, $key, $index);
+        if ((new ArrayOf)->Length($FOnClick) > 1) {
+            if ((new StrOf)->Length($FOnClick['value'], true) > 0) {
                 $AResult['content'] = $FOnClick['value'];
-                if (ALGOL::DefaultOf()->TypeCheck($AResult['content'], DTC_HTML)) $this->format = 'raw';
+                if ((new DefaultOf)->TypeCheck($AResult['content'], DTC_HTML)) $this->format = 'raw';
             }
-            if (ALGOL::StrOf()->Length($FOnClick['url'], true) > 0) {
-                $FOptions = ALGOL::ArrayOf()->FromFunction($this->contentOptions, $model, $key, $index);
-                if (ALGOL::DefaultOf()->ValueCheck($FOnClick['expand'], true)) {
+            if ((new StrOf)->Length($FOnClick['url'], true) > 0) {
+                $FOptions = (new ArrayOf)->FromFunction($this->contentOptions, $model, $key, $index);
+                if ((new DefaultOf)->ValueCheck($FOnClick['expand'], true)) {
                     if (is_null($this->url_expand)) {
                         $this->url_expand = $FOnClick['url'];
                         $this->regScript(true);
                     }
                     $FOptions['data-row_id'] = $this->normalizeRowID($key);
                     $FOptions['data-col_id'] = $this->column_id;
-                    $FClass = self::EXPANDED_CLASS . CH_MINUS . $this->column_id;
+                    $FClass = $this->EXPANDED_CLASS . CH_MINUS . $this->column_id;
                 } else {
                     if (is_null($this->url_goto)) {
                         $this->url_goto = $FOnClick['url'];
                         $this->regScript(false);
                     }
-                    $FClass = self::EXPANDED_CLASS . CH_MINUS . self::REDIRECT;
+                    $FClass = $this->EXPANDED_CLASS . CH_MINUS . $this->REDIRECT;
                 }
                 $FOptions['class'] = $FClass . (isset($FOptions['class']) ? " {$FOptions['class']}" : CH_FREE);
-                if (ALGOL::ArrayOf()->Length($FOnClick['data']) > 0) $FOptions['data-info'] = $FOnClick['data']; else $FOptions['data-info'] = is_array($key) ? $key : ['id' => $key];
+                if ((new ArrayOf)->Length($FOnClick['data']) > 0) $FOptions['data-info'] = $FOnClick['data']; else $FOptions['data-info'] = is_array($key) ? $key : ['id' => $key];
                 $AResult['options'] = $FOptions;
             }
         }
@@ -410,7 +573,7 @@ class GridColumnExpandOf extends DataColumn {
     private function regScript($AExpand = true) {
         if (Yii::$app->getRequest()->getIsAjax()) return;
         if ($AExpand) {
-            $FClass = $FClass = self::EXPANDED_CLASS . CH_MINUS . $this->column_id;
+            $FClass = $FClass = $this->EXPANDED_CLASS . CH_MINUS . $this->column_id;
             $FOptions = Json::encode(['url' => $this->url_expand,
                 'countColumns' => count($this->grid->columns),
                 'enableCache' => (bool)$this->enableCache,
@@ -419,7 +582,7 @@ class GridColumnExpandOf extends DataColumn {
                 'showEffect' => 'fadeIn',
                 'redirect' => false]);
         } else {
-            $FClass = $FClass = self::EXPANDED_CLASS . CH_MINUS . self::REDIRECT;
+            $FClass = $FClass = $this->EXPANDED_CLASS . CH_MINUS . $this->REDIRECT;
             $FOptions = Json::encode(['url' => $this->url_goto, 'redirect' => true]);
         }
 
@@ -458,5 +621,169 @@ class ExpandColumnAsset extends AssetBundle {
     public $sourcePath = '@vendor/algolteam/library-yii2/assets';
     public $js = ['js/expand-column.js'];
     public $css = ['css/expand-column.css'];
-    public $depends = ['yii\web\JqueryAsset'];
+    public $depends = ['yii\web\YiiAsset', 'yii\web\JqueryAsset'];
+}
+
+/**
+ * ModalOf
+ *
+ * @category  Class
+ * @package   Utility-Yii2
+ * @author    AlgolTeam <algolitc@gmail.com>
+ * @copyright Copyright (c) 2021
+ * @link      https://github.com/algolteam
+ */
+
+class ModalOf extends \yii\base\Widget {
+
+    public $click;
+    public $title = 'Title';
+    public $content = 'This is content';
+    public $footer;
+
+    public function init() {
+        parent::init();
+        ob_start();
+   }
+
+    public function run() {
+        parent::run();
+        return $this->renderAll($this->getId(), ob_get_clean());
+    }
+
+    private function renderAll($AID, $AContent) {
+        $FResult = null;
+        if (isset($this->click)) {
+            $FResult = $this->renderClick($AID) . $this->renderModal($AID, $AContent);
+        }
+        return $FResult;
+    }
+
+    private function renderClick($AID) {
+        $FResult = $this->click;
+        if (isset($FResult)) {
+            // Click Create
+            if (is_array($FResult)) {
+                $FElementName = $AID . '-click';
+                $FTag = ArrayHelper::remove($FResult, 'tag', 'button');
+                $FLabel = ArrayHelper::remove($FResult, 'label', 'Click me');
+                $FResult = array_merge($FResult, ['id' => $FElementName]);
+                $FResult = Html::tag($FTag, $FLabel, $FResult);
+            } else {
+                $FElementName = $FResult;
+                $FResult = null;
+            }
+            // JS
+            (new HtmlOf)->CreateJsFunction($FElementName, 'click', ["event.preventDefault();","$('#$AID-modal').css({display: 'block'})"], ['event' => 'arg']);
+        }
+        return $FResult;
+    }
+
+    private function renderModal($AID, $AContent) {
+        // Header, Body, Footer
+        $FResult = $this->renderHeader($AID) . $this->renderBody($AID, $AContent) . $this->renderFooter($AID);
+        if (!empty($FResult)) {
+            // Modal, Form
+            $FResult = Html::beginTag('div', [
+                'id' => "$AID-modal",
+                'style' => [
+                    'display' => 'none',
+                    'position' => 'fixed',
+                    'z-index' => 1,
+                    'padding-top' => '100px',
+                    'left' => 0,
+                    'top' => 0,
+                    'width' => '100%',
+                    'height' => '100%',
+                    'overflow' => 'auto',
+                    'background-color' => 'rgb(0,0,0)',
+                    'background-color' => 'rgba(0,0,0,0.4)']
+            ]) . Html::beginTag('div', [
+                'id' => "$AID-form",
+                'style' => [
+                    'position' => 'relative',
+                    'background-color' => '#fefefe',
+                    'margin' => 'auto',
+                    'padding' => '0',
+                    'border' => '1px solid #888',
+                    'width' => '40%',
+                    'box-shadow' => '0 4px 8px 0 rgba(0,0,0,0.2),0 6px 20px 0 rgba(0,0,0,0.19)'
+                ]
+            ]) .
+                $FResult .
+                Html::endTag('div') .
+                Html::endTag('div');
+            // JS
+            (new HtmlOf)->CreateJsFunction('window', 'click', ["if (event.target.id == '$AID-modal') { $('#$AID-modal').css({display: 'none'}); }"], ['event' => 'arg']);
+        }
+        return $FResult;
+    }
+
+    private function renderHeader($AID) {
+        $FResult = null;
+        if (!is_null($this->title)) {
+            $FTitle = $this->title;
+            $FClose = '&times;';
+            if (is_array($FTitle)) {
+                $FTitle = (new DefaultOf)->ValueCheck($FTitle['label'], 'Title');
+                $FClose = (new DefaultOf)->ValueCheck($FTitle['close'], $FClose);
+            }
+            // Header
+            $FResult = Html::beginTag('div', [
+                'id' => "$AID-header",
+                'style' => [
+                    'padding' => '2px 16px',
+                    'background-color' => '#5cb85c',
+                    'color' => 'white']
+                ]) .
+                Html::beginTag('span', [
+                    'id' => "$AID-close",
+                    'style' => [
+                        'color' => 'white',
+                        'float' => 'right',
+                        'font-size' => '28px',
+                        'font-weight' => 'bold',
+                        'cursor' => 'pointer']
+                ]) .
+                $FClose .
+                Html::endTag('span') .
+                $FTitle . '<br><br>' .
+                Html::endTag('div');
+            // JS
+            (new HtmlOf)->CreateJsFunction("$AID-close", 'click', ["$('#$AID-modal').css({display: 'none'})"]);
+        }
+        return $FResult;
+    }
+
+    private function renderBody($AID, $AContent) {
+        $FResult = (new DefaultOf)->ValueCheck($AContent, $this->content);
+        if (!empty($FResult)) {
+            // Body
+            $FResult = Html::beginTag('div', [
+                    'id' => "$AID-content",
+                    'style' => ['padding' => '2px 16px']
+                ]) .
+                $FResult . '<br><br>' .
+                Html::endTag('div');
+        }
+        return $FResult;
+    }
+
+    private function renderFooter($AID) {
+        $FResult = null;
+        if (!empty($this->footer)) {
+            // Footer
+            $FResult = Html::beginTag('div', [
+                    'id' => "$AID-footer",
+                    'style' => [
+                        'padding' => '2px 16px',
+                        'background-color' => '#5cb85c',
+                        'color' => 'white']
+                ]) .
+                $this->footer .
+                Html::endTag('div');
+        }
+        return $FResult;
+    }
+
 }
