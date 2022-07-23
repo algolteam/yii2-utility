@@ -227,30 +227,77 @@ class ActiveRecordOf extends ActiveRecord {
         return $this->Filter($ATableName, $AValues, $AResult, $AColumns, 1, null, true, $AOrder, $AGroup, $AJoin, $AJSONParseField, $ACond);
     }
 
-    public function Append($ATableName, $AValues, &$AResult) {
-        $AResult = $this->useTable($ATableName);
-        foreach ($AValues as $FKey => $FValue) {
-            $AResult->setAttribute($FKey, $FValue);
+    public function Append($ATableName, $AValues, &$AResult, $AMultiInsert = false) {
+        $FResult = null;
+        $AResult = null;
+        if ($AMultiInsert) {
+            $FResult = ((new ArrayOf)->Length($AValues) == 2) and Yii::$app->db->createCommand()->batchInsert($ATableName, $AValues[0], $AValues[1])->execute();
+        } else {
+            $AResult = $this->useTable($ATableName);
+            if (isset($AResult)) {
+                foreach ($AValues as $FKey => $FValue) {
+                    $AResult->setAttribute($FKey, $FValue);
+                }
+                $FResult = $AResult->save();
+            } else {
+                $FResult = ((new ArrayOf)->Length($AValues) == 2) and Yii::$app->db->createCommand()->insert($ATableName, $AValues)->execute();
+                if ($FResult) $AResult = Yii::$app->db->lastInsertID;
+            }
         }
-        return $AResult->save();
+        return $FResult;
+    }
+
+    public function Edit($ATableName, $AValues, $AFilter = CH_FREE, $AParam = []) {
+        if ((new DefaultOf)->TypeCheck($AFilter)) {
+            $FFilter = "ID = $AFilter";
+            $FParam = null;
+        } else {
+            $FFilter = $AFilter;
+            $FParam = $AParam;
+            $this->BindOf($FFilter, $FParam);
+        }
+        return Yii::$app->db->createCommand()->update($ATableName, $AValues, $FFilter, $FParam)->execute();
+    }
+
+    public function Deleted($ATableName, $AFilter = CH_FREE, $AParam = []) {
+        if ((new DefaultOf)->TypeCheck($AFilter)) {
+            $FFilter = "ID = $AFilter";
+            $FParam = null;
+        } else {
+            $FFilter = $AFilter;
+            $FParam = $AParam;
+            $this->BindOf($FFilter, $FParam);
+        }
+        return Yii::$app->db->createCommand()->delete($ATableName, $FFilter, $FParam)->execute();
+    }
+
+    private function BindOf(&$AQuery, &$AParam) {
+        $FResult = null;
+        if (!(new StrOf)->Empty($AQuery) and !(new ArrayOf)->Empty($AParam)) {
+            $FMoneyFound = false;
+            foreach ($AParam as $FKey => $FValue) {
+                if ((new StrOf)->Pos($AQuery, CH_MONEY . $FKey) > 0) {
+                    $FResult[CH_POINT_TWO_VER . $FKey] = $FValue;
+                    $FMoneyFound = true;
+                } elseif ((new StrOf)->FoundWord($AQuery, $FKey)) {
+                    $FResult[CH_POINT_TWO_VER . $FKey] = $FValue;
+                    $AQuery = (new StrOf)->Replace($AQuery, $FKey, CH_POINT_TWO_VER . $FKey);
+                }
+            }
+            if (isset($FResult)) {
+                $AParam = $FResult;
+                if ($FMoneyFound) $AQuery = (new StrOf)->Replace($AQuery, CH_MONEY, CH_POINT_TWO_VER);
+            }
+        }
+        return isset($FResult);
     }
 
     private function Execute($ASqlQuery, &$AResult, $AValues = null) {
         $AResult = null;
         if (!(new StrOf)->Empty($ASqlQuery)) {
-            $FValues = null;
+            $FValues = $AValues;
             $FQuery = $ASqlQuery;
-            if (!(new ArrayOf)->Empty($AValues)) {
-                foreach ($AValues as $FKey => $FValue) {
-                    if ((new StrOf)->Pos($FQuery, CH_MONEY . $FKey) > 0) {
-                        $FValues[CH_POINT_TWO_VER . $FKey] = $FValue;
-                    } elseif ((new StrOf)->FoundWord($FQuery, $FKey)) {
-                        $FValues[CH_POINT_TWO_VER . $FKey] = $FValue;
-                        $FQuery = (new StrOf)->Replace($FQuery, $FKey, CH_POINT_TWO_VER . $FKey);
-                    }
-                }
-            }
-            if (is_null($FValues)) $AResult = Yii::$app->db->createCommand($FQuery); else $AResult = Yii::$app->db->createCommand((new StrOf)->Replace($FQuery, CH_MONEY, CH_POINT_TWO_VER), $FValues);
+            if ($this->BindOf($FQuery, $FValues)) $AResult = Yii::$app->db->createCommand($FQuery, $FValues); else $AResult = Yii::$app->db->createCommand($FQuery);
         }
         return (bool)$AResult;
     }
@@ -449,7 +496,7 @@ class HtmlOf {
         $FArguments = null;
         $FVariables = null;
         $FCode = $ACode;
-        if ($AElementID[0] == CH_POINT) $FElementID = "'$AElementID'";
+        if (($AElementID[0] == CH_POINT) or (new StrOf)->Found($AElementID, [CH_NET, CH_BRACE_SQR_BEGIN, CH_POINT_TWO_VER])) $FElementID = "'$AElementID'";
         elseif (in_array($AElementID, ['window'])) $FElementID = $AElementID;
         else $FElementID = "'#$AElementID'";
         if (!(new ArrayOf)->Empty($AParam)) {
@@ -625,6 +672,22 @@ class ExpandColumnAsset extends AssetBundle {
 }
 
 /**
+ * SerializeJsonAsset
+ *
+ * @category  Class
+ * @package   Utility-Yii2
+ * @author    AlgolTeam <algolitc@gmail.com>
+ * @copyright Copyright (c) 2021
+ * @link      https://github.com/algolteam
+ */
+
+class SerializeJsonAsset extends AssetBundle {
+    public $sourcePath = '@vendor/algolteam/library-yii2/assets';
+    public $js = ['js/serializeJSON.js'];
+    public $depends = ['yii\web\JqueryAsset'];
+}
+
+/**
  * ModalOf
  *
  * @category  Class
@@ -637,13 +700,22 @@ class ExpandColumnAsset extends AssetBundle {
 class ModalOf extends \yii\base\Widget {
 
     public $click;
+    public $action;
     public $title = 'Title';
-    public $content = 'This is content';
-    public $footer;
+    public $content;
+    public $submit = 'submit';
+
+    public $modalOptions = [];
+    public $formOptions = [];
+
+    public $method = 'post';
+
+    private $jsOptions;
 
     public function init() {
         parent::init();
         ob_start();
+        SerializeJsonAsset::register($this->getView());
    }
 
     public function run() {
@@ -653,8 +725,9 @@ class ModalOf extends \yii\base\Widget {
 
     private function renderAll($AID, $AContent) {
         $FResult = null;
-        if (isset($this->click)) {
+        if (isset($this->click, $this->action)) {
             $FResult = $this->renderClick($AID) . $this->renderModal($AID, $AContent);
+            if (!empty($FResult)) $this->renderJS($AID);
         }
         return $FResult;
     }
@@ -664,7 +737,7 @@ class ModalOf extends \yii\base\Widget {
         if (isset($FResult)) {
             // Click Create
             if (is_array($FResult)) {
-                $FElementName = $AID . '-click';
+                $FElementName = "$AID-click";
                 $FTag = ArrayHelper::remove($FResult, 'tag', 'button');
                 $FLabel = ArrayHelper::remove($FResult, 'label', 'Click me');
                 $FResult = array_merge($FResult, ['id' => $FElementName]);
@@ -674,17 +747,20 @@ class ModalOf extends \yii\base\Widget {
                 $FResult = null;
             }
             // JS
-            (new HtmlOf)->CreateJsFunction($FElementName, 'click', ["event.preventDefault();","$('#$AID-modal').css({display: 'block'})"], ['event' => 'arg']);
+            $this->jsOptions['click'] = $FElementName;
         }
         return $FResult;
     }
 
     private function renderModal($AID, $AContent) {
         // Header, Body, Footer
-        $FResult = $this->renderHeader($AID) . $this->renderBody($AID, $AContent) . $this->renderFooter($AID);
+        $FResult = $this->renderHeader($AID);
         if (!empty($FResult)) {
+            $FResult .= $this->renderBody($AID, $AContent);
             // Modal, Form
-            $FResult = Html::beginTag('div', [
+            $FModalOptions = $this->modalOptions;
+            $FFormOptions = $this->formOptions;
+            $FModalOptions = array_merge_recursive($FModalOptions, [
                 'id' => "$AID-modal",
                 'style' => [
                     'display' => 'none',
@@ -695,26 +771,34 @@ class ModalOf extends \yii\base\Widget {
                     'top' => 0,
                     'width' => '100%',
                     'height' => '100%',
-                    'overflow' => 'auto',
-                    'background-color' => 'rgb(0,0,0)',
-                    'background-color' => 'rgba(0,0,0,0.4)']
-            ]) . Html::beginTag('div', [
+                    'overflow' => 'auto']
+            ]);
+            $FModalOptions = array_merge_recursive(['style' => [
+                'background-color' => 'rgb(0,0,0)',
+                'background-color' => 'rgba(0,0,0,0.4)']
+            ], $FModalOptions);
+
+            $FFormOptions = array_merge_recursive($FFormOptions, [
                 'id' => "$AID-form",
                 'style' => [
                     'position' => 'relative',
-                    'background-color' => '#fefefe',
                     'margin' => 'auto',
-                    'padding' => '0',
+                    'padding' => '0']
+            ]);
+            $FFormOptions = array_merge_recursive([
+                'style' => [
+                    'background-color' => '#fefefe',
                     'border' => '1px solid #888',
                     'width' => '40%',
-                    'box-shadow' => '0 4px 8px 0 rgba(0,0,0,0.2),0 6px 20px 0 rgba(0,0,0,0.19)'
-                ]
-            ]) .
+                    'box-shadow' => '0 4px 8px 0 rgba(0,0,0,0.2),0 6px 20px 0 rgba(0,0,0,0.19)']
+            ], $FFormOptions);
+
+            $FResult = Html::beginTag('div', $FModalOptions) . Html::beginTag('div', $FFormOptions) .
                 $FResult .
                 Html::endTag('div') .
                 Html::endTag('div');
             // JS
-            (new HtmlOf)->CreateJsFunction('window', 'click', ["if (event.target.id == '$AID-modal') { $('#$AID-modal').css({display: 'none'}); }"], ['event' => 'arg']);
+            $this->jsOptions['modal']['window'] = true;
         }
         return $FResult;
     }
@@ -723,67 +807,96 @@ class ModalOf extends \yii\base\Widget {
         $FResult = null;
         if (!is_null($this->title)) {
             $FTitle = $this->title;
-            $FClose = '&times;';
+            $FCloseTitle = '&times;';
             if (is_array($FTitle)) {
-                $FTitle = (new DefaultOf)->ValueCheck($FTitle['label'], 'Title');
-                $FClose = (new DefaultOf)->ValueCheck($FTitle['close'], $FClose);
+                $FOptions = $FTitle;
+                $FTitle = ArrayHelper::remove($FOptions, 'label', 'Title');
+                $FCloseOptions = ArrayHelper::remove($FOptions, 'close', []);
+                $FCloseTitle = ArrayHelper::remove($FCloseOptions, 'label', $FCloseTitle);
+            } else {
+                $FOptions = [];
+                $FCloseOptions = [];
             }
             // Header
-            $FResult = Html::beginTag('div', [
-                'id' => "$AID-header",
+            $FOptions = array_merge($FOptions, ['id' => "$AID-header"]);
+            $FCloseOptions = array_merge($FCloseOptions, ['id' => "$AID-close"]);
+            $FOptions = array_merge_recursive([
                 'style' => [
                     'padding' => '2px 16px',
                     'background-color' => '#5cb85c',
                     'color' => 'white']
-                ]) .
-                Html::beginTag('span', [
-                    'id' => "$AID-close",
-                    'style' => [
-                        'color' => 'white',
-                        'float' => 'right',
-                        'font-size' => '28px',
-                        'font-weight' => 'bold',
-                        'cursor' => 'pointer']
-                ]) .
-                $FClose .
+            ], $FOptions);
+            $FCloseOptions = array_merge_recursive([
+                'style' => [
+                    'color' => 'white',
+                    'float' => 'right',
+                    'font-size' => '28px',
+                    'font-weight' => 'bold',
+                    'cursor' => 'pointer']
+            ], $FCloseOptions);
+            $FResult = Html::beginTag('div', $FOptions) .
+                Html::beginTag('span', $FCloseOptions) .
+                $FCloseTitle .
                 Html::endTag('span') .
                 $FTitle . '<br><br>' .
                 Html::endTag('div');
             // JS
-            (new HtmlOf)->CreateJsFunction("$AID-close", 'click', ["$('#$AID-modal').css({display: 'none'})"]);
+            $this->jsOptions['header']['close'] = true;
         }
         return $FResult;
     }
 
     private function renderBody($AID, $AContent) {
-        $FResult = (new DefaultOf)->ValueCheck($AContent, $this->content);
-        if (!empty($FResult)) {
-            // Body
-            $FResult = Html::beginTag('div', [
-                    'id' => "$AID-content",
-                    'style' => ['padding' => '2px 16px']
-                ]) .
-                $FResult . '<br><br>' .
-                Html::endTag('div');
+        // Body
+        $FContent = $this->content;
+        if (is_array($FContent)) {
+            $FOptions = $FContent;
+            $FContent = ArrayHelper::remove($FOptions, 'label', $AContent);
+            $FAction = ArrayHelper::remove($FOptions, 'action', $this->action);
+            $FMethod = ArrayHelper::remove($FOptions, 'method', $this->method);
+        } else {
+            $FOptions = [];
+            $FContent = (new DefaultOf)->ValueCheck($AContent, $FContent);
+            $FAction = $this->action;
+            $FMethod = $this->method;
         }
+        $FOptions = array_merge($FOptions, ['id' => "$AID-content"]);
+        $FOptions = array_merge_recursive(['style' => [
+            'padding' => '12px 16px']
+        ], $FOptions);
+        $FResult = Html::beginForm($FAction, $FMethod, $FOptions) .
+                   $FContent .
+                   Html::endForm();
+        // JS
+        $this->jsOptions['body']['content'] = (bool)empty($FContent);
         return $FResult;
     }
 
-    private function renderFooter($AID) {
-        $FResult = null;
-        if (!empty($this->footer)) {
-            // Footer
-            $FResult = Html::beginTag('div', [
-                    'id' => "$AID-footer",
-                    'style' => [
-                        'padding' => '2px 16px',
-                        'background-color' => '#5cb85c',
-                        'color' => 'white']
-                ]) .
-                $this->footer .
-                Html::endTag('div');
+    private function renderJS($AID) {
+        if(isset($this->jsOptions['click'])) {
+            // show click
+            $FCode = ["event.preventDefault();"]; //dataType: 'json',
+            if ($this->jsOptions['body']['content']) $FCode[] = "$.ajax({url: '$this->action', type: '$this->method', dataType: 'html', data: {'status': 'content'}, success: function (data) { $('#$AID-content').html(data); } })";
+            $FCode[] = "$('#$AID-modal').css({display: 'block'})";
+            (new HtmlOf)->CreateJsFunction($this->jsOptions['click'], 'click', $FCode, ['event' => 'arg']);
+            // submit click
+            $FCode = ["event.preventDefault();",
+                "var form = $('#$AID-content')",
+                "var formData = form.serializeJSON()",
+                "form.children('input[type=file]').each(function () { if (this.value.trim().length !== 0) {formData[this.name]=this.value;} })",
+                "$.each(this.attributes, function (index, attribute) { if (attribute.value.trim().length !== 0) {formData[attribute.name] = attribute.value;} })",
+//                      "$.post('$this->action', {status: 'submit', data: formData})",
+                "$.ajax({url: '$this->action', type: '$this->method', data: {'status': 'submit', data: formData} })",
+                "$('#$AID-close').click();"];
+            (new HtmlOf)->CreateJsFunction("#$AID-modal #$this->submit,#$AID-modal :submit", 'click', $FCode, ['event' => 'arg']);
         }
-        return $FResult;
+        if ($this->jsOptions['modal']['window']) {
+            (new HtmlOf)->CreateJsFunction('window', 'click', ["if (event.target.id == '$AID-modal') { $('#$AID-modal').css({display: 'none'}); }"], ['event' => 'arg']);
+        }
+        if ($this->jsOptions['header']['close']) {
+            (new HtmlOf)->CreateJsFunction("$AID-close", 'click', ["$('#$AID-modal').css({display: 'none'})"]);
+        }
+        return ;
     }
 
 }
