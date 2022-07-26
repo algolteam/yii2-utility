@@ -337,6 +337,16 @@ class ActiveRecordOf extends ActiveRecord {
         return (bool)$AResult;
     }
 
+    public function SqlToActiveQuery($ASqlQuery, &$AResult, $AValues = null) {
+        $AResult = null;
+        if (!(new StrOf)->Empty($ASqlQuery)) {
+            $FValues = $AValues;
+            $FQuery = $ASqlQuery;
+            if ($this->BindOf($FQuery, $FValues)) $AResult = self::findBySql($FQuery, $FValues); else $AResult = self::findBySql($FQuery);
+        }
+        return (bool)$AResult;
+    }
+
 }
 
 // Const ToGo
@@ -496,9 +506,11 @@ class HtmlOf {
         $FArguments = null;
         $FVariables = null;
         $FCode = $ACode;
-        if (($AElementID[0] == CH_POINT) or (new StrOf)->Found($AElementID, [CH_NET, CH_BRACE_SQR_BEGIN, CH_POINT_TWO_VER])) $FElementID = "'$AElementID'";
-        elseif (in_array($AElementID, ['window'])) $FElementID = $AElementID;
-        else $FElementID = "'#$AElementID'";
+        if (isset($AElementID)) {
+            if (($AElementID[0] == CH_POINT) or (new StrOf)->Found($AElementID, [CH_NET, CH_BRACE_SQR_BEGIN, CH_POINT_TWO_VER])) $FElementID = "'$AElementID'";
+            elseif (in_array($AElementID, ['window'])) $FElementID = $AElementID;
+            else $FElementID = "'#$AElementID'";
+        }
         if (!(new ArrayOf)->Empty($AParam)) {
             foreach ($AParam as $FVarName => $FElemID) {
                 if ((new StrOf)->Same($FElemID, 'arg')) {
@@ -513,12 +525,22 @@ class HtmlOf {
         if (!(new ArrayOf)->Empty($ACode)) $FCode = (new ArrayOf)->ToString($FCode, CH_POINT_COMMA . CH_NEW_LINE, true, '   %s');
         $FCode = (new StrOf)->Replace($FCode . CH_POINT_COMMA, CH_POINT_COMMA . CH_POINT_COMMA, CH_POINT_COMMA);
         if (!(new StrOf)->Empty($FVariables)) $FCode = $FVariables . CH_NEW_LINE . $FCode;
-        $js = <<<JS
+        if (isset($AElementID)) {
+            $js = <<<JS
 $($FElementID).on('$AEvent', function($FArguments) {
 $FCode
 })
 
 JS;
+        } else {
+            $js = <<<JS
+function $AEvent($FArguments) {
+$FCode
+}
+
+JS;
+        }
+
         return Yii::$app->getView()->registerJs($js, \yii\web\View::POS_END);
     }
 
@@ -703,12 +725,13 @@ class ModalOf extends \yii\base\Widget {
     public $action;
     public $title = 'Title';
     public $content;
+    public $fields;
     public $submit = 'submit';
+    public $method = 'post';
+    public $cssClass;
 
     public $modalOptions = [];
     public $formOptions = [];
-
-    public $method = 'post';
 
     private $jsOptions;
 
@@ -716,7 +739,7 @@ class ModalOf extends \yii\base\Widget {
         parent::init();
         ob_start();
         SerializeJsonAsset::register($this->getView());
-   }
+    }
 
     public function run() {
         parent::run();
@@ -726,6 +749,7 @@ class ModalOf extends \yii\base\Widget {
     private function renderAll($AID, $AContent) {
         $FResult = null;
         if (isset($this->click, $this->action)) {
+            $this->OptionInit($AID);
             $FResult = $this->renderClick($AID) . $this->renderModal($AID, $AContent);
             if (!empty($FResult)) $this->renderJS($AID);
         }
@@ -760,40 +784,38 @@ class ModalOf extends \yii\base\Widget {
             // Modal, Form
             $FModalOptions = $this->modalOptions;
             $FFormOptions = $this->formOptions;
-            $FModalOptions = array_merge_recursive($FModalOptions, [
+            $FModalOptions = array_replace_recursive(['style' => [
+                'background-color' => 'rgb(0,0,0)',
+                'background-color' => 'rgba(0,0,0,0.4)']
+            ], $FModalOptions, [
                 'id' => "$AID-modal",
                 'style' => [
                     'display' => 'none',
                     'position' => 'fixed',
-                    'z-index' => 1,
+                    'z-index' => 99999,
                     'padding-top' => '100px',
                     'left' => 0,
                     'top' => 0,
                     'width' => '100%',
                     'height' => '100%',
+                    'box-sizing' => 'content-box',
                     'overflow' => 'auto']
             ]);
-            $FModalOptions = array_merge_recursive(['style' => [
-                'background-color' => 'rgb(0,0,0)',
-                'background-color' => 'rgba(0,0,0,0.4)']
-            ], $FModalOptions);
-
-            $FFormOptions = array_merge_recursive($FFormOptions, [
+            $FFormOptions = array_replace_recursive([
+                'style' => [
+                    'background-color' => '#fefefe',
+                    'border' => '1px solid #888',
+                    'width' => '40%',
+                    'box-shadow' => '0 4px 8px 0 rgba(0,0,0,0.2),0 6px 20px 0 rgba(0,0,0,0.19)']
+            ], $FFormOptions, [
                 'id' => "$AID-form",
                 'style' => [
                     'position' => 'relative',
                     'margin' => 'auto',
                     'padding' => '0']
             ]);
-            $FFormOptions = array_merge_recursive([
-                'style' => [
-                    'background-color' => '#fefefe',
-                    'border' => '1px solid #888',
-                    'width' => '40%',
-                    'box-shadow' => '0 4px 8px 0 rgba(0,0,0,0.2),0 6px 20px 0 rgba(0,0,0,0.19)']
-            ], $FFormOptions);
-
-            $FResult = Html::beginTag('div', $FModalOptions) . Html::beginTag('div', $FFormOptions) .
+            $FResult = Html::beginTag('div', $FModalOptions) .
+                Html::beginTag('div', $FFormOptions) .
                 $FResult .
                 Html::endTag('div') .
                 Html::endTag('div');
@@ -818,27 +840,32 @@ class ModalOf extends \yii\base\Widget {
                 $FCloseOptions = [];
             }
             // Header
-            $FOptions = array_merge($FOptions, ['id' => "$AID-header"]);
-            $FCloseOptions = array_merge($FCloseOptions, ['id' => "$AID-close"]);
-            $FOptions = array_merge_recursive([
+            $FOptions = array_replace_recursive([
                 'style' => [
                     'padding' => '2px 16px',
                     'background-color' => '#5cb85c',
+                    'font-size' => 'x-large',
+                    'cursor' => 'default',
                     'color' => 'white']
-            ], $FOptions);
-            $FCloseOptions = array_merge_recursive([
+            ], $FOptions, [
+                'id' => "$AID-header",
+                'style' => [
+                    'display' => 'flex',
+                    'flex-flow' => 'row-reverse',
+                    'align-items' => 'center',
+                    'justify-content' => 'space-between']
+            ]);
+            $FCloseOptions = array_replace_recursive([
                 'style' => [
                     'color' => 'white',
                     'float' => 'right',
-                    'font-size' => '28px',
-                    'font-weight' => 'bold',
                     'cursor' => 'pointer']
-            ], $FCloseOptions);
+            ], $FCloseOptions, ['id' => "$AID-close"]);
             $FResult = Html::beginTag('div', $FOptions) .
                 Html::beginTag('span', $FCloseOptions) .
                 $FCloseTitle .
                 Html::endTag('span') .
-                $FTitle . '<br><br>' .
+                $FTitle .
                 Html::endTag('div');
             // JS
             $this->jsOptions['header']['close'] = true;
@@ -860,13 +887,12 @@ class ModalOf extends \yii\base\Widget {
             $FAction = $this->action;
             $FMethod = $this->method;
         }
-        $FOptions = array_merge($FOptions, ['id' => "$AID-content"]);
-        $FOptions = array_merge_recursive(['style' => [
-            'padding' => '12px 16px']
-        ], $FOptions);
+        $FOptions = array_replace_recursive(['style' => [
+            'padding' => '16px 16px']
+        ], $FOptions, ['id' => "$AID-content"]);
         $FResult = Html::beginForm($FAction, $FMethod, $FOptions) .
-                   $FContent .
-                   Html::endForm();
+            $FContent .
+            Html::endForm();
         // JS
         $this->jsOptions['body']['content'] = (bool)empty($FContent);
         return $FResult;
@@ -878,17 +904,105 @@ class ModalOf extends \yii\base\Widget {
             $FCode = ["event.preventDefault();"]; //dataType: 'json',
             if ($this->jsOptions['body']['content']) $FCode[] = "$.ajax({url: '$this->action', type: '$this->method', dataType: 'html', data: {'status': 'content'}, success: function (data) { $('#$AID-content').html(data); } })";
             $FCode[] = "$('#$AID-modal').css({display: 'block'})";
+            $FCode[] = "document.querySelectorAll('.$AID-remove').forEach(el => el.remove())";
+            $FCode[] = "if (this.hasAttribute('id') == false) { this.setAttribute('id', Math.random().toString(36).substr(2, 9)); }";
+            $FCode[] = "$(this).each(function() { $.each(this.attributes, function() { if (this.specified) { 
+                        var input = document.createElement('input');
+                        input.setAttribute('type', 'hidden');
+                        input.setAttribute('name', 'this['+this.name+']');
+                        input.setAttribute('value', this.value);
+                        input.setAttribute('class', '$AID-remove');
+                        document.getElementById('$AID-content').appendChild(input); 
+                        } }); });";   // $('#$AID-content').append('<input type=hidden name='+this.name+' value='+this.value+' />');
+            $FCode[] = "$('#$AID-content').append('<input type=hidden name=this[content] value='+this.textContent+' class=$AID-remove />')";
+            if (is_array($this->fields)) {
+                $FFields = json_encode($this->fields);
+                $FCode[] = "var fields = $FFields;
+                            var elements = document.getElementById('$AID-content').elements;
+                            $.each(fields, function(key, value) {
+                                var el = elements[value.name];
+                                if (el) el.setAttribute(value.event, 'fields(this)');
+                           });";
+                $FCode2 = ["var formData = {_csrf: document.getElementById('$AID-content').elements['_csrf'].value, status: 'fields', data: el.value}",
+                    "var this_attr = {}",
+                    "if (el.hasAttribute('id') == false) { el.setAttribute('id', Math.random().toString(36).substr(2, 9)); }",
+                    "$.each(el.attributes, function(index, attr) {
+                                this_attr[attr.name] = attr.value;
+                           } ); ",
+                    "formData['this'] = this_attr",
+                    "$.ajax({
+                                url: '$this->action', 
+                                type: '$this->method',
+                                data: formData, 
+                                success: function (data) { 
+                                    const fdata = JSON.parse(data); 
+                                    if (fdata.id) {
+                                        var element = document.querySelector('[name=\''+fdata.id+'\'], '+fdata.id);
+                                        if (element) {
+                                            if (fdata.html) element.innerHTML = fdata.html;
+                                            if (fdata.value) element.setAttribute('value', fdata.value);
+                                        }
+                                    } else {
+                                        for (const item in fdata) {
+                                            var element = document.querySelector('[name=\''+fdata[item].id+'\'], '+fdata[item].id);
+                                            if (element) {
+                                                if (fdata[item].html) element.innerHTML = fdata[item].html;
+                                                if (fdata[item].value) element.setAttribute('value', fdata[item].value);
+                                            }
+                                        }
+                                    }
+                                    return false; 
+                                } 
+                           })"
+                ];
+                (new HtmlOf)->CreateJsFunction(null, 'fields', $FCode2, ['el' => 'arg']);
+            }
             (new HtmlOf)->CreateJsFunction($this->jsOptions['click'], 'click', $FCode, ['event' => 'arg']);
             // submit click
             $FCode = ["event.preventDefault();",
                 "var form = $('#$AID-content')",
-                "var formData = form.serializeJSON()",
-                "form.children('input[type=file]').each(function () { if (this.value.trim().length !== 0) {formData[this.name]=this.value;} })",
-                "$.each(this.attributes, function (index, attribute) { if (attribute.value.trim().length !== 0) {formData[attribute.name] = attribute.value;} })",
-//                      "$.post('$this->action', {status: 'submit', data: formData})",
-                "$.ajax({url: '$this->action', type: '$this->method', data: {'status': 'submit', data: formData} })",
+                "const formSerialize = form.find(':input').filter(function () { return $.trim(this.value).length > 0 }).serializeJSON(), formData = {'_csrf': formSerialize._csrf, status: 'submit', this: formSerialize.this}",
+                "delete formSerialize._csrf; delete formSerialize.this",
+                "form.children('input[type=file]').each(function () { if (this.value.trim().length > 0) {formSerialize[this.name]=this.value;} })",
+                "formData.data = formSerialize",
+//                "$.each(this.attributes, function (index, attribute) { if (attribute.value.trim().length !== 0) {formData[attribute.name] = attribute.value;} })",
+//                "$.post('$this->action', {status: 'submit', data: formData})",
+                "$.ajax({url: '$this->action', type: '$this->method', data: formData, 
+                    success: function (data) {
+                        const fdata = JSON.parse(data); 
+                        if (fdata.id) {
+                            var element = document.querySelector('[name=\''+fdata[item].id+'\']');
+                            element = element ? element : document.querySelector(fdata[item].id);
+                            if (element) {
+                                if (!fdata.click) {
+                                    var elem = $('[name=\''+fdata.id+'\'], '+fdata.id);                                   
+                                    elem.unbind('click');                                
+                                }
+                                if (fdata.html) element.innerHTML = fdata.html;
+                                if (fdata.value) element.setAttribute('value', fdata.value);
+                            }
+                        } else {
+                            for (const item in fdata) {
+                                var element = document.querySelector('[name=\''+fdata[item].id+'\']');
+                                element = element ? element : document.querySelector(fdata[item].id);
+                                if (element) {
+                                    if (!fdata[item].click) {
+                                        var elem = $('[name=\''+fdata[item].id+'\'], '+fdata[item].id);                                   
+                                        elem.unbind('click');
+                                    }
+                                    if (fdata[item].html) element.innerHTML = fdata[item].html;
+                                    if (fdata[item].value) element.setAttribute('value', fdata[item].value);
+                                }
+                            }
+                        }
+                        return false; 
+                    }
+                })",
                 "$('#$AID-close').click();"];
             (new HtmlOf)->CreateJsFunction("#$AID-modal #$this->submit,#$AID-modal :submit", 'click', $FCode, ['event' => 'arg']);
+            // Dragged
+            $FCode = ["dragElement('$AID-form', '$AID-header')"];
+            (new HtmlOf)->CreateJsFunction('window', 'load', $FCode);
         }
         if ($this->jsOptions['modal']['window']) {
             (new HtmlOf)->CreateJsFunction('window', 'click', ["if (event.target.id == '$AID-modal') { $('#$AID-modal').css({display: 'none'}); }"], ['event' => 'arg']);
@@ -897,6 +1011,36 @@ class ModalOf extends \yii\base\Widget {
             (new HtmlOf)->CreateJsFunction("$AID-close", 'click', ["$('#$AID-modal').css({display: 'none'})"]);
         }
         return ;
+    }
+
+    private function OptionInit($AID) {
+        if (isset($this->cssClass)) {
+            // add class title
+            if (isset($this->title['class'])) $FClassTitle = ArrayHelper::remove($this->title, 'class', CH_FREE); else $FClassTitle = CH_FREE;
+            if (isset($this->title['close']['class'])) $FClassClose = ArrayHelper::remove($this->title['close'], 'class', CH_FREE); else $FClassClose = CH_FREE;
+            $FOptions = ['class' => trim("$this->cssClass-header $FClassTitle"), 'close' => ['class' => trim("$this->cssClass-close $FClassClose")]];
+            if (isset($this->title)) {
+                if (is_array($this->title)) $this->title = array_replace_recursive($this->title, $FOptions); else $this->title = array_merge($FOptions, ['label' => $this->title]);
+            } else $this->title = $FOptions;
+            // add class content
+            if (isset($this->content['class'])) $FClassContent = ArrayHelper::remove($this->content, 'class', CH_FREE); else $FClassContent = CH_FREE;
+            $FOptions = ['class' => trim("$this->cssClass-content $FClassContent")];
+            if (isset($this->content)) {
+                if (is_array($this->content)) $this->content = array_replace_recursive($this->content, $FOptions); else $this->content = array_merge($FOptions, ['label' => $this->content]);
+            } else $this->content = $FOptions;
+            // add class modal
+            if (isset($this->modalOptions['class'])) $FClassModal = ArrayHelper::remove($this->modalOptions, 'class', CH_FREE); else $FClassModal = CH_FREE;
+            $FOptions = ['class' => trim("$this->cssClass-modal $FClassModal")];
+            if (isset($this->modalOptions)) {
+                if (is_array($this->modalOptions)) $this->modalOptions = array_replace_recursive($this->modalOptions, $FOptions); else $this->modalOptions = $FOptions;
+            } else $this->modalOptions = $FOptions;
+            // add class form
+            if (isset($this->formOptions['class'])) $FClassForm = ArrayHelper::remove($this->formOptions, 'class', CH_FREE); else $FClassForm = CH_FREE;
+            $FOptions = ['class' => trim("$this->cssClass-form $FClassForm")];
+            if (isset($this->formOptions)) {
+                if (is_array($this->formOptions)) $this->formOptions = array_replace_recursive($this->formOptions, $FOptions); else $this->formOptions = $FOptions;
+            } else $this->formOptions = $FOptions;
+        }
     }
 
 }
