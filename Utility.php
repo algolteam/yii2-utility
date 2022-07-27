@@ -241,8 +241,8 @@ class ActiveRecordOf extends ActiveRecord {
                 $FResult = $AResult->save();
             } else {
                 $FResult = ((new ArrayOf)->Length($AValues) == 2) and Yii::$app->db->createCommand()->insert($ATableName, $AValues)->execute();
-                if ($FResult) $AResult = Yii::$app->db->lastInsertID;
             }
+            if ($FResult) $AResult = Yii::$app->db->getLastInsertID();
         }
         return $FResult;
     }
@@ -353,6 +353,7 @@ class ActiveRecordOf extends ActiveRecord {
 const TGT_Link = "TGT_Link";
 const TGT_Mail = "TGT_Mail";
 const TGT_Submit = "TGT_Submit";
+const TGT_Button = "TGT_Button";
 const TGT_Reset = "TGT_Reset";
 const TGT_DataPost = "TGT_DataPost";
 const TGT_FormPost = "TGT_FormPost";
@@ -723,6 +724,7 @@ class ModalOf extends \yii\base\Widget {
 
     public $click;
     public $action;
+    public $loader;
     public $title = 'Title';
     public $content;
     public $fields;
@@ -900,66 +902,8 @@ class ModalOf extends \yii\base\Widget {
 
     private function renderJS($AID) {
         if(isset($this->jsOptions['click'])) {
-            // show click
-            $FCode = ["event.preventDefault();"]; //dataType: 'json',
-            if ($this->jsOptions['body']['content']) $FCode[] = "$.ajax({url: '$this->action', type: '$this->method', dataType: 'html', data: {'status': 'content'}, success: function (data) { $('#$AID-content').html(data); } })";
-            $FCode[] = "$('#$AID-modal').css({display: 'block'})";
-            $FCode[] = "document.querySelectorAll('.$AID-remove').forEach(el => el.remove())";
-            $FCode[] = "if (this.hasAttribute('id') == false) { this.setAttribute('id', Math.random().toString(36).substr(2, 9)); }";
-            $FCode[] = "$(this).each(function() { $.each(this.attributes, function() { if (this.specified) { 
-                        var input = document.createElement('input');
-                        input.setAttribute('type', 'hidden');
-                        input.setAttribute('name', 'this['+this.name+']');
-                        input.setAttribute('value', this.value);
-                        input.setAttribute('class', '$AID-remove');
-                        document.getElementById('$AID-content').appendChild(input); 
-                        } }); });";   // $('#$AID-content').append('<input type=hidden name='+this.name+' value='+this.value+' />');
-            $FCode[] = "$('#$AID-content').append('<input type=hidden name=this[content] value='+this.textContent+' class=$AID-remove />')";
-            if (is_array($this->fields)) {
-                $FFields = json_encode($this->fields);
-                $FCode[] = "var fields = $FFields;
-                            var elements = document.getElementById('$AID-content').elements;
-                            $.each(fields, function(key, value) {
-                                var el = elements[value.name];
-                                if (el) el.setAttribute(value.event, 'fields(this)');
-                           });";
-                $FCode2 = ["var formData = {_csrf: document.getElementById('$AID-content').elements['_csrf'].value, status: 'fields', data: el.value}",
-                    "var this_attr = {}",
-                    "if (el.hasAttribute('id') == false) { el.setAttribute('id', Math.random().toString(36).substr(2, 9)); }",
-                    "$.each(el.attributes, function(index, attr) {
-                                this_attr[attr.name] = attr.value;
-                           } ); ",
-                    "formData['this'] = this_attr",
-                    "$.ajax({
-                                url: '$this->action', 
-                                type: '$this->method',
-                                data: formData, 
-                                success: function (data) { 
-                                    const fdata = JSON.parse(data); 
-                                    if (fdata.id) {
-                                        var element = document.querySelector('[name=\''+fdata.id+'\'], '+fdata.id);
-                                        if (element) {
-                                            if (fdata.html) element.innerHTML = fdata.html;
-                                            if (fdata.value) element.setAttribute('value', fdata.value);
-                                        }
-                                    } else {
-                                        for (const item in fdata) {
-                                            var element = document.querySelector('[name=\''+fdata[item].id+'\'], '+fdata[item].id);
-                                            if (element) {
-                                                if (fdata[item].html) element.innerHTML = fdata[item].html;
-                                                if (fdata[item].value) element.setAttribute('value', fdata[item].value);
-                                            }
-                                        }
-                                    }
-                                    return false; 
-                                } 
-                           })"
-                ];
-                (new HtmlOf)->CreateJsFunction(null, 'fields', $FCode2, ['el' => 'arg']);
-            }
-            (new HtmlOf)->CreateJsFunction($this->jsOptions['click'], 'click', $FCode, ['event' => 'arg']);
-            // submit click
-            $FCode = ["event.preventDefault();",
+            // submit code
+            $FCodeSubmit = ["event.preventDefault()",
                 "var form = $('#$AID-content')",
                 "const formSerialize = form.find(':input').filter(function () { return $.trim(this.value).length > 0 }).serializeJSON(), formData = {'_csrf': formSerialize._csrf, status: 'submit', this: formSerialize.this}",
                 "delete formSerialize._csrf; delete formSerialize.this",
@@ -967,10 +911,26 @@ class ModalOf extends \yii\base\Widget {
                 "formData.data = formSerialize",
 //                "$.each(this.attributes, function (index, attribute) { if (attribute.value.trim().length !== 0) {formData[attribute.name] = attribute.value;} })",
 //                "$.post('$this->action', {status: 'submit', data: formData})",
-                "$.ajax({url: '$this->action', type: '$this->method', data: formData, 
+                "$.ajax({
+                    url: '$this->action', 
+                    type: '$this->method', 
+                    data: formData,
+                    " . ((isset($this->loader)) ? "
+                    beforeSend: function() {
+                      $('$this->loader').show();
+                    }, " : CH_FREE) . "                     
                     success: function (data) {
-                        const fdata = JSON.parse(data); 
-                        if (fdata.id) {
+                        " . ((isset($this->loader)) ? "
+                        $('$this->loader').hide();
+                        " : CH_FREE) . "                    
+                        if (data == 1) {
+                            document.location.reload(true);
+                            return false;
+                        } else if (!data) return false;
+                        const fdata = JSON.parse(data);
+                        if (fdata.url) {
+                            location.href = fdata.url;
+                        } else if (fdata.id) {
                             var element = document.querySelector('[name=\''+fdata[item].id+'\']');
                             element = element ? element : document.querySelector(fdata[item].id);
                             if (element) {
@@ -996,10 +956,128 @@ class ModalOf extends \yii\base\Widget {
                             }
                         }
                         return false; 
+                    },
+                    error: function(xhr, textStatus, error){
+                        " . ((isset($this->loader)) ? "
+                        $('$this->loader').hide();
+                        " : CH_FREE) . "                     
+                        alert(xhr.responseText);
+//                        debugger;
                     }
                 })",
-                "$('#$AID-close').click();"];
-            (new HtmlOf)->CreateJsFunction("#$AID-modal #$this->submit,#$AID-modal :submit", 'click', $FCode, ['event' => 'arg']);
+                "$('#$AID-close').click()"];
+            $FCodeSubmitStr = ALGOL::ArrayOf()->ToString($FCodeSubmit, CH_POINT_COMMA);
+            // show click
+            $FCode = ["event.preventDefault();"]; //dataType: 'json',
+            $FCode[] = "document.querySelectorAll('.$AID-remove').forEach(el => el.remove())";
+            $FCode[] = "if (this.hasAttribute('id') == false) { this.setAttribute('id', Math.random().toString(36).substr(2, 9)); }";
+            if ($this->jsOptions['body']['content']) $FCode[] = "
+                var showData = {_csrf: document.getElementById('$AID-content').elements['_csrf'].value, status: 'content'};
+                var addData = '<input type=\'hidden\' name=\'_csrf\' value=\''+showData._csrf+'\'>';
+                addData += '<input type=\'hidden\' name=\'this[content]\' value=\''+this.textContent.trim()+'\' class=\'$AID-remove\' />';
+                var this_attr = {content: this.textContent.trim()};
+                $.each(this.attributes, function(index, attr) {
+                    this_attr[attr.name] = attr.value;
+                    addData += '<input type=\'hidden\' name=\'this['+attr.name+']\' value=\''+attr.value.trim()+'\' />'; 
+                } );
+                showData['this'] = this_attr;                                      
+                $.ajax({                        
+                    url: '$this->action', 
+                    type: '$this->method', 
+                    dataType: 'html', 
+                    data: showData,
+                    " . ((isset($this->loader)) ? "
+                    beforeSend: function() {
+                      $('$this->loader').show();
+                    }, " : CH_FREE) . "                    
+                    success: function (data) {
+                        " . ((isset($this->loader)) ? "
+                        $('$this->loader').hide();
+                        " : CH_FREE) . "                    
+                        $('#$AID-content').html(addData+data);
+                        $('#$AID-modal #$this->submit,#$AID-modal :submit').on('click', function(event) {
+                        $FCodeSubmitStr
+                        })                        
+                        return false;
+                    },
+                    error: function(xhr, textStatus, error){
+                        " . ((isset($this->loader)) ? "
+                        $('$this->loader').hide();
+                        " : CH_FREE) . "                     
+                        alert(xhr.responseText);
+//                        debugger;
+                    }                     
+               })";
+            $FCode[] = "$('#$AID-modal').css({display: 'block'})";
+            $FCode[] = "$('#$AID-content').append('<input type=\'hidden\' name=\'this[content]\' value=\''+this.textContent.trim()+'\' class=\'$AID-remove\' />')";
+            $FCode[] = "$(this).each(function() { $.each(this.attributes, function() { if (this.specified) {
+                        var input = document.createElement('input');
+                        input.setAttribute('type', 'hidden');
+                        input.setAttribute('name', 'this['+this.name+']');
+                        input.setAttribute('value', this.value.trim());
+                        input.setAttribute('class', '$AID-remove');
+                        document.getElementById('$AID-content').appendChild(input);
+                        } }); });";   // $('#$AID-content').append('<input type=hidden name='+this.name+' value='+this.value+' />');
+            if (is_array($this->fields)) {
+                $FFields = json_encode($this->fields);
+                $FCode[] = "var fields = $FFields;
+                            var elements = document.getElementById('$AID-content').elements;
+                            $.each(fields, function(key, value) {
+                                var el = elements[value.name];
+                                if (el) el.setAttribute(value.event, 'fields(this)');
+                           });";
+                $FCode2 = ["var formData = {_csrf: document.getElementById('$AID-content').elements['_csrf'].value, status: 'fields', data: el.value}",
+                    "var this_attr = {}",
+                    "if (el.hasAttribute('id') == false) { el.setAttribute('id', Math.random().toString(36).substr(2, 9)); }",
+                    "$.each(el.attributes, function(index, attr) {
+                                this_attr[attr.name] = attr.value.trim();
+                           } ); ",
+                    "formData['this'] = this_attr",
+                    "$.ajax({
+                                url: '$this->action', 
+                                type: '$this->method',
+                                data: formData,
+                                " . ((isset($this->loader)) ? "
+                                beforeSend: function() {
+                                  $('$this->loader').show();
+                                }, " : CH_FREE) . "
+                                success: function (data) {
+                                    " . ((isset($this->loader)) ? "
+                                    $('$this->loader').hide();
+                                    " : CH_FREE) . "                                 
+                                    if (!data) return false;
+                                    const fdata = JSON.parse(data); 
+                                    if (fdata.id) {
+                                        var element = document.querySelector('[name=\''+fdata.id+'\'], '+fdata.id);
+                                        if (element) {
+                                            if (fdata.html) element.innerHTML = fdata.html;
+                                            if (fdata.value) element.setAttribute('value', fdata.value);
+                                        }
+                                    } else {
+                                        for (const item in fdata) {
+                                            var element = document.querySelector('[name=\''+fdata[item].id+'\'], '+fdata[item].id);
+                                            if (element) {
+                                                if (fdata[item].html) element.innerHTML = fdata[item].html;
+                                                if (fdata[item].value) element.setAttribute('value', fdata[item].value);
+                                            }
+                                        }
+                                    }
+                                    return false; 
+                                },
+                                error: function(xhr, textStatus, error){
+                                    " . ((isset($this->loader)) ? "
+                                    $('$this->loader').hide();
+                                    " : CH_FREE) . "                     
+                                    alert(xhr.responseText);
+            //                        debugger;
+                                }                                 
+                           })"
+                ];
+                (new HtmlOf)->CreateJsFunction(null, 'fields', $FCode2, ['el' => 'arg']);
+            }
+            (new HtmlOf)->CreateJsFunction($this->jsOptions['click'], 'click', $FCode, ['event' => 'arg']);
+            // submit click
+            (new HtmlOf)->CreateJsFunction("#$AID-modal #$this->submit,#$AID-modal :submit", 'click', $FCodeSubmit, ['event' => 'arg']);
             // Dragged
             $FCode = ["dragElement('$AID-form', '$AID-header')"];
             (new HtmlOf)->CreateJsFunction('window', 'load', $FCode);
