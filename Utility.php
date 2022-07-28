@@ -101,6 +101,18 @@ class AppOf {
         return $FResult->isPost or (bool)$AResult;
     }
 
+    public function ActiveActionCheck($AName, $ATrue, $AFalse) {
+        return (new StrOf)->Same(Yii::$app->controller->action->id, $AName) ? $ATrue : $AFalse;
+    }
+
+    public function ActiveControllerCheck($AName, $ATrue, $AFalse) {
+        return (new StrOf)->Same(Yii::$app->controller->id, $AName) ? $ATrue : $AFalse;
+    }
+
+    public function ActiveModuleCheck($AName, $ATrue, $AFalse) {
+        return (new StrOf)->Same(Yii::$app->controller->module->id, $AName) ? $ATrue : $AFalse;
+    }
+
 }
 
 /**
@@ -347,6 +359,15 @@ class ActiveRecordOf extends ActiveRecord {
         return (bool)$AResult;
     }
 
+    public function Counter($ATableName, $AColumn, $AFilters, $AValue = 1) {
+        if ($AValue > 0) {
+            if ($this->SqlToExecute("UPDATE $ATableName SET $AColumn = $AColumn + $AValue WHERE $AFilters", $FResult)) return $FResult; else return false;
+        } elseif ($AValue < 0) {
+            $FValue = -1 * $AValue;
+            if ($this->SqlToExecute("UPDATE $ATableName SET $AColumn = $AColumn - $FValue WHERE $AFilters", $FResult)) return $FResult; else return false;
+        } else return false;
+    }
+
 }
 
 // Const ToGo
@@ -380,14 +401,13 @@ class HtmlOf {
         return Html::hiddenInput('_csrf', Yii::$app->request->getCsrfToken());
     }
 
-    public function ToGo($AValue, $AUrl, $AData = null, $AType = TGT_Link, $AClass = null, $AHttps = false) {
+    public function ToGo($AValue, $AUrl, $AData = null, $AType = TGT_Link, $AOptions = null) {
         $FResult = CH_FREE;
         if (!(new StrOf)->Empty([$AValue, $AUrl])) {
             // Get Param
             $FValue = $AValue;
             $FUrl = [$AUrl];
-            $FOptions = [];
-            if (!is_null($AClass)) $FOptions['class'] = $AClass;
+            $FOptions = $AOptions;
             // Check Post
             if ($AType === TGT_FormPost) {
                 $FResult = Html::beginForm($FUrl, 'post', ['class' => 'form-inline']);
@@ -398,8 +418,6 @@ class HtmlOf {
                 }
                 $FResult .= Html::submitButton($FValue, $FOptions) . Html::endForm();
             } else {
-                // Get Param
-                if ($AHttps) $FUrl[] = 'https';
                 // Check post
                 if ($AType === TGT_DataPost) {
                     $FOptions['data-method'] = 'POST';
@@ -925,9 +943,16 @@ class ModalOf extends \yii\base\Widget {
                         " : CH_FREE) . "                    
                         if (data == 1) {
                             document.location.reload(true);
+                            $('#$AID-content').trigger('reset');
                             return false;
-                        } else if (!data) return false;
+                        } else if (!data) {
+                            $('#$AID-content').trigger('reset');
+                            return false;
+                        }
                         const fdata = JSON.parse(data);
+                        if (fdata.message) {
+                            alert(fdata.message);
+                        }
                         if (fdata.url) {
                             location.href = fdata.url;
                         } else if (fdata.id) {
@@ -941,20 +966,23 @@ class ModalOf extends \yii\base\Widget {
                                 if (fdata.html) element.innerHTML = fdata.html;
                                 if (fdata.value) element.setAttribute('value', fdata.value);
                             }
-                        } else {
+                        } else if (Object.keys(fdata).length > 0) {
                             for (const item in fdata) {
-                                var element = document.querySelector('[name=\''+fdata[item].id+'\']');
-                                element = element ? element : document.querySelector(fdata[item].id);
-                                if (element) {
-                                    if (!fdata[item].click) {
-                                        var elem = $('[name=\''+fdata[item].id+'\'], '+fdata[item].id);                                   
-                                        elem.unbind('click');
-                                    }
-                                    if (fdata[item].html) element.innerHTML = fdata[item].html;
-                                    if (fdata[item].value) element.setAttribute('value', fdata[item].value);
+                                if (fdata[item].id) {
+                                    var element = document.querySelector('[name=\''+fdata[item].id+'\']');
+                                    element = element ? element : document.querySelector(fdata[item].id);
+                                    if (element) {
+                                        if (!fdata[item].click) {
+                                            var elem = $('[name=\''+fdata[item].id+'\'], '+fdata[item].id);                                   
+                                            elem.unbind('click');
+                                        }
+                                        if (fdata[item].html) element.innerHTML = fdata[item].html;
+                                        if (fdata[item].value) element.setAttribute('value', fdata[item].value);
+                                    }                                
                                 }
                             }
                         }
+                        $('#$AID-content').trigger('reset');
                         return false; 
                     },
                     error: function(xhr, textStatus, error){
@@ -962,6 +990,7 @@ class ModalOf extends \yii\base\Widget {
                         $('$this->loader').hide();
                         " : CH_FREE) . "                     
                         alert(xhr.responseText);
+                        $('#$AID-content').trigger('reset');
 //                        debugger;
                     }
                 })",
