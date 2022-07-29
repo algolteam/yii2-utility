@@ -748,6 +748,7 @@ class ModalOf extends \yii\base\Widget {
     public $fields;
     public $submit = 'submit';
     public $method = 'post';
+    public $empty = true;
     public $cssClass;
 
     public $modalOptions = [];
@@ -763,6 +764,7 @@ class ModalOf extends \yii\base\Widget {
 
     public function run() {
         parent::run();
+        if (empty($this->action)) $this->action = Yii::$app->getUniqueId();
         return $this->renderAll($this->getId(), ob_get_clean());
     }
 
@@ -921,9 +923,10 @@ class ModalOf extends \yii\base\Widget {
     private function renderJS($AID) {
         if(isset($this->jsOptions['click'])) {
             // submit code
+            if ($this->empty) $FEmpty = "find(':input').filter(function () { return $.trim(this.value).length > 0 })."; else $FEmpty = CH_FREE;
             $FCodeSubmit = ["event.preventDefault()",
-                "var form = $('#$AID-content')",
-                "const formSerialize = form.find(':input').filter(function () { return $.trim(this.value).length > 0 }).serializeJSON(), formData = {'_csrf': formSerialize._csrf, status: 'submit', this: formSerialize.this}",
+                "var form = $('#$AID-content, #$AID-content form, #$AID-content div')",
+                "const formSerialize = form.". $FEmpty ."serializeJSON(), formData = {'_csrf': formSerialize._csrf, status: 'submit', this: formSerialize.this}",
                 "delete formSerialize._csrf; delete formSerialize.this",
                 "form.children('input[type=file]').each(function () { if (this.value.trim().length > 0) {formSerialize[this.name]=this.value;} })",
                 "formData.data = formSerialize",
@@ -940,22 +943,24 @@ class ModalOf extends \yii\base\Widget {
                     success: function (data) {
                         " . ((isset($this->loader)) ? "
                         $('$this->loader').hide();
-                        " : CH_FREE) . "                    
+                        " : CH_FREE) . "
+                        if (!data || (data == 0)) {
+                            $('#$AID-content').trigger('reset');
+                            return false;
+                        }
                         if (data == 1) {
                             document.location.reload(true);
                             $('#$AID-content').trigger('reset');
                             return false;
-                        } else if (!data) {
+                        }
+                        try {
+                            const fdata = JSON.parse(data);
+                        } catch (error) {
+                            alert(error);
                             $('#$AID-content').trigger('reset');
                             return false;
                         }
-                        const fdata = JSON.parse(data);
-                        if (fdata.message) {
-                            alert(fdata.message);
-                        }
-                        if (fdata.url) {
-                            location.href = fdata.url;
-                        } else if (fdata.id) {
+                        if (fdata.id) {
                             var element = document.querySelector('[name=\''+fdata[item].id+'\']');
                             element = element ? element : document.querySelector(fdata[item].id);
                             if (element) {
@@ -966,7 +971,8 @@ class ModalOf extends \yii\base\Widget {
                                 if (fdata.html) element.innerHTML = fdata.html;
                                 if (fdata.value) element.setAttribute('value', fdata.value);
                             }
-                        } else if (Object.keys(fdata).length > 0) {
+                        }
+                        if (Object.keys(fdata).length > 0) {
                             for (const item in fdata) {
                                 if (fdata[item].id) {
                                     var element = document.querySelector('[name=\''+fdata[item].id+'\']');
@@ -981,6 +987,14 @@ class ModalOf extends \yii\base\Widget {
                                     }                                
                                 }
                             }
+                        }
+                        if (fdata.message) {
+                            alert(fdata.message);
+                        }                        
+                        if (fdata.url) {
+                            location.href = fdata.url;
+                        } else if (fdata.refresh) {
+                            document.location.reload(true);                        
                         }
                         $('#$AID-content').trigger('reset');
                         return false; 
@@ -1037,6 +1051,7 @@ class ModalOf extends \yii\base\Widget {
 //                        debugger;
                     }                     
                })";
+            $FCode[] = "document.getElementById('$AID-content').reset();";
             $FCode[] = "$('#$AID-modal').css({display: 'block'})";
             $FCode[] = "$('#$AID-content').append('<input type=\'hidden\' name=\'this[content]\' value=\''+this.textContent.trim()+'\' class=\'$AID-remove\' />')";
             $FCode[] = "$(this).each(function() { $.each(this.attributes, function() { if (this.specified) {
