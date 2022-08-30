@@ -245,15 +245,16 @@ class ActiveRecordOf extends ActiveRecord {
         if ($AMultiInsert) {
             $FResult = ((new ArrayOf)->Length($AValues) == 2) and Yii::$app->db->createCommand()->batchInsert($ATableName, $AValues[0], $AValues[1])->execute();
         } else {
-            $AResult = $this->useTable($ATableName);
-            if (isset($AResult)) {
-                foreach ($AValues as $FKey => $FValue) {
-                    $AResult->setAttribute($FKey, $FValue);
-                }
-                $FResult = $AResult->save();
-            } else {
-                $FResult = ((new ArrayOf)->Length($AValues) == 2) and Yii::$app->db->createCommand()->insert($ATableName, $AValues)->execute();
-            }
+//            $AResult = $this->useTable($ATableName);
+//            if (isset($AResult)) {
+//                $FValues = $this->GetColumnValidate($ATableName, $AValues);
+//                foreach ($FValues as $FKey => $FValue) {
+//                    $AResult->setAttribute($FKey, $FValue);
+//                }
+//                $FResult = $AResult->save();
+//            } else {
+                $FResult = Yii::$app->db->createCommand()->insert($ATableName, $this->GetColumnValidate($ATableName, $AValues))->execute();
+//            }
             if ($FResult) $AResult = Yii::$app->db->getLastInsertID();
         }
         return $FResult;
@@ -262,19 +263,19 @@ class ActiveRecordOf extends ActiveRecord {
     public function Edit($ATableName, $AValues, $AFilter = CH_FREE, $AParam = []) {
         if ((new DefaultOf)->TypeCheck($AFilter)) {
             $FFilter = "ID = $AFilter";
-            $FParam = null;
+            $FParam = [];
         } else {
             $FFilter = $AFilter;
             $FParam = $AParam;
             $this->BindOf($FFilter, $FParam);
         }
-        return Yii::$app->db->createCommand()->update($ATableName, $AValues, $FFilter, $FParam)->execute();
+        return Yii::$app->db->createCommand()->update($ATableName, $this->GetColumnValidate($ATableName, $AValues), $FFilter, $FParam)->execute();
     }
 
     public function Deleted($ATableName, $AFilter = CH_FREE, $AParam = []) {
         if ((new DefaultOf)->TypeCheck($AFilter)) {
             $FFilter = "ID = $AFilter";
-            $FParam = null;
+            $FParam = [];
         } else {
             $FFilter = $AFilter;
             $FParam = $AParam;
@@ -314,9 +315,14 @@ class ActiveRecordOf extends ActiveRecord {
         return (bool)$AResult;
     }
 
-    public function SqlToAll($ASqlQuery, &$AResult, $AValues = null) {
+    public function SqlToAll($ASqlQuery, &$AResult, $AValues = null, $AFormat = null) {
         if ($this->Execute($ASqlQuery, $AResult, $AValues)) {
             $AResult = $AResult->queryAll();
+            if (!(new StrOf)->Empty($AFormat) and !(new ArrayOf)->Empty($AResult)) {
+                foreach ($AResult as $FKey => $FValue) {
+                    $AResult[$FKey] = (new StrOf)->Replace($AFormat, array_keys($FValue), array_values($FValue));
+                }
+            }
         }
         return (bool)$AResult;
     }
@@ -368,6 +374,28 @@ class ActiveRecordOf extends ActiveRecord {
         } else return false;
     }
 
+    public function GetColumnAll($ATableName, $ADefault = null) {
+        $FResult = Yii::$app->db->createCommand("SELECT * FROM $ATableName")->queryOne();
+        if ($FResult) return array_keys($FResult); else return $ADefault;
+    }
+
+    private function GetColumnName ($ATableName, $AColumn) {
+        if ((new StrOf)->Pos($AColumn, $ATableName . CH_POINT) > 0) return $AColumn; else return $ATableName . CH_POINT . $AColumn;
+    }
+
+    public function GetColumnValidate($ATableName, $AValues) {
+        $FResult = [];
+        if (!empty($ATableName) and is_array($AValues)) {
+            $FColumns = $this->GetColumnAll($ATableName, array_keys($AValues));
+            if (isset($FColumns)) {
+                foreach ($FColumns as $FColumn) {
+                    if (!(new StrOf)->Same($FColumn, 'ID') and array_key_exists($FColumn, $AValues) and isset($AValues[$FColumn])) $FResult[$this->GetColumnName($ATableName, $FColumn)] = (new DefaultOf)->ValueFromString($AValues[$FColumn]);
+                }
+            }
+        }
+        return $FResult;
+    }
+
 }
 
 // Const ToGo
@@ -397,8 +425,8 @@ const AA_Url = "AA_Url";
 
 class HtmlOf {
 
-    public function GetFormToken() {
-        return Html::hiddenInput('_csrf', Yii::$app->request->getCsrfToken());
+    public function GetFormToken($ACsrfOnly = false) {
+        if ($ACsrfOnly) return Yii::$app->request->getCsrfToken(); else return Html::hiddenInput('_csrf', Yii::$app->request->getCsrfToken());
     }
 
     public function ToGo($AValue, $AUrl, $AData = null, $AType = TGT_Link, $AOptions = null) {
@@ -465,32 +493,32 @@ class HtmlOf {
                 $FName = $AParam['name'];
                 switch ($FAction) {
                     case AA_SqlAll:
-                        $FDefault = (new DefaultOf)->ValueCheck($AParam['default'], CH_FREE);
-                        $FQuery = (new StrOf)->Replace((new DefaultOf)->ValueCheck($AParam['query'], CH_FREE), array_keys($FResult), array_values($FResult));
-                        $FData = (new ArrayOf)->Of(AO_Merge, $FResult, $AParam['data']);
+                        $FDefault = (new DefaultOf)->ValueCheck($AParam['default'] ?? null, CH_FREE);
+                        $FQuery = (new StrOf)->Replace((new DefaultOf)->ValueCheck($AParam['query'] ?? null, CH_FREE), array_keys($FResult), array_values($FResult));
+                        $FData = (new ArrayOf)->Of(AO_Merge, $FResult, $AParam['data'] ?? null);
                         if ((new ActiveRecordOf)->SqlToAll($FQuery, $FSubResult, $FData)) {
                             if (isset($AParam['format'])) {
-                                $FResult[$FName] = $this->FromArray($FSubResult, $AParam['format'], $FDefault, $AParam['interval']);
+                                $FResult[$FName] = $this->FromArray($FSubResult, $AParam['format'], $FDefault, $AParam['interval'] ?? null);
                             } elseif (!(new ArrayOf)->Empty($FSubResult)) {
-                                $FResult[$FName] = (new ArrayOf)->ToString($FSubResult, (new DefaultOf)->ValueCheck($AParam['interval'], CH_COMMA . CH_SPACE));
+                                $FResult[$FName] = (new ArrayOf)->ToString($FSubResult, (new DefaultOf)->ValueCheck($AParam['interval'] ?? null, CH_COMMA . CH_SPACE));
                             } else $FResult[$FName] = $FDefault;
                         } else $FResult[$FName] = $FDefault;
                         break;
                     case AA_SqlOne:
-                        $FDefault = (new DefaultOf)->ValueCheck($AParam['default'], CH_FREE);
-                        $FQuery = (new StrOf)->Replace((new DefaultOf)->ValueCheck($AParam['query'], CH_FREE), array_keys($FResult), array_values($FResult));
+                        $FDefault = (new DefaultOf)->ValueCheck($AParam['default'] ?? null, CH_FREE);
+                        $FQuery = (new StrOf)->Replace((new DefaultOf)->ValueCheck($AParam['query'] ?? null, CH_FREE), array_keys($FResult), array_values($FResult));
                         $FData = (new ArrayOf)->Of(AO_Merge, $FResult, $AParam['data']);
                         if ((new ActiveRecordOf)->SqlToOne($FQuery, $FSubResult, $FData)) {
                             if (isset($AParam['format'])) {
                                 $FResult[$FName] = (new StrOf)->Replace($AParam['format'], array_keys($FSubResult), array_values($FSubResult));
                             } elseif (!(new ArrayOf)->Empty($FSubResult)) {
-                                $FResult[$FName] = (new ArrayOf)->ToString($FSubResult, (new DefaultOf)->ValueCheck($AParam['interval'], CH_COMMA . CH_SPACE));
+                                $FResult[$FName] = (new ArrayOf)->ToString($FSubResult, (new DefaultOf)->ValueCheck($AParam['interval'] ?? null, CH_COMMA . CH_SPACE));
                             } else $FResult[$FName] = $FDefault;
                         } else $FResult[$FName] = $FDefault;
                         break;
                     case AA_SqlCount:
-                        $FDefault = (new DefaultOf)->ValueCheck($AParam['default'], CH_FREE);
-                        $FQuery = (new StrOf)->Replace((new DefaultOf)->ValueCheck($AParam['query'], CH_FREE), array_keys($FResult), array_values($FResult));
+                        $FDefault = (new DefaultOf)->ValueCheck($AParam['default'] ?? null, CH_FREE);
+                        $FQuery = (new StrOf)->Replace((new DefaultOf)->ValueCheck($AParam['query'] ?? null, CH_FREE), array_keys($FResult), array_values($FResult));
                         $FData = (new ArrayOf)->Of(AO_Merge, $FResult, $AParam['data']);
                         if ((new ActiveRecordOf)->SqlToExecute($FQuery, $FSubResult, $FData)) {
                             if (isset($AParam['format'])) {
@@ -499,7 +527,7 @@ class HtmlOf {
                         } else $FResult[$FName] = $FDefault;
                         break;
                     case AA_Url:
-                        $FResult[$FName] = (new StrOf)->Replace(Url::to((new DefaultOf)->ValueCheck($AParam['url'], 'home')), array_keys($FResult), array_values($FResult));
+                        $FResult[$FName] = (new StrOf)->Replace(Url::to((new DefaultOf)->ValueCheck($AParam['url'] ?? null, 'home')), array_keys($FResult), array_values($FResult));
                         break;
                 }
             }
@@ -632,7 +660,7 @@ class GridColumnExpandOf extends DataColumn {
             }
             if ((new StrOf)->Length($FOnClick['url'], true) > 0) {
                 $FOptions = (new ArrayOf)->FromFunction($this->contentOptions, $model, $key, $index);
-                if ((new DefaultOf)->ValueCheck($FOnClick['expand'], true)) {
+                if ((new DefaultOf)->ValueCheck($FOnClick['expand'] ?? null, true)) {
                     if (is_null($this->url_expand)) {
                         $this->url_expand = $FOnClick['url'];
                         $this->regScript(true);
@@ -722,9 +750,12 @@ class ExpandColumnAsset extends AssetBundle {
  * @link      https://github.com/algolteam
  */
 
-class SerializeJsonAsset extends AssetBundle {
+class LibraryJsAsset extends AssetBundle {
     public $sourcePath = '@vendor/algolteam/library-yii2/assets';
-    public $js = ['js/serializeJSON.js'];
+    public $js = [
+        'https://code.jquery.com/ui/1.13.2/jquery-ui.min.js',
+        'js/library.js',
+    ];
     public $depends = ['yii\web\JqueryAsset'];
 }
 
@@ -740,15 +771,23 @@ class SerializeJsonAsset extends AssetBundle {
 
 class ModalOf extends \yii\base\Widget {
 
+    public $name;
     public $click;
     public $action;
     public $loader;
-    public $title = 'Title';
+    public $title;
     public $content;
     public $fields;
+    public $default;
+    public $focus;
+    public $data = true;
+    public $success = true;
+    public $refresh = false;
+    public $close = true;
     public $submit = 'submit';
     public $method = 'post';
     public $empty = true;
+    public $pjax;
     public $cssClass;
 
     public $modalOptions = [];
@@ -759,21 +798,25 @@ class ModalOf extends \yii\base\Widget {
     public function init() {
         parent::init();
         ob_start();
-        SerializeJsonAsset::register($this->getView());
+        LibraryJsAsset::register($this->getView());
     }
 
     public function run() {
         parent::run();
+        $FId = $this->getId();
+        if (empty($this->name)) $this->name = $FId;
         if (empty($this->action)) $this->action = Yii::$app->getUniqueId();
-        return $this->renderAll($this->getId(), ob_get_clean());
+        return $this->renderAll($FId, ob_get_clean());
     }
 
     private function renderAll($AID, $AContent) {
         $FResult = null;
         if (isset($this->click, $this->action)) {
-            $this->OptionInit($AID);
-            $FResult = $this->renderClick($AID) . $this->renderModal($AID, $AContent);
-            if (!empty($FResult)) $this->renderJS($AID);
+            if (isset($this->title)) {
+                $this->OptionInit($AID);
+                $FResult = $this->renderClick($AID) . $this->renderModal($AID, $AContent);
+                if (!empty($FResult)) $this->renderJS($AID);
+            } else $this->renderOneJS($AID);
         }
         return $FResult;
     }
@@ -842,7 +885,7 @@ class ModalOf extends \yii\base\Widget {
                 Html::endTag('div') .
                 Html::endTag('div');
             // JS
-            $this->jsOptions['modal']['window'] = true;
+            $this->jsOptions['modal']['window'] = $this->close;
         }
         return $FResult;
     }
@@ -920,22 +963,203 @@ class ModalOf extends \yii\base\Widget {
         return $FResult;
     }
 
+    private function renderOneJS($AID) {
+        if(isset($this->click)) {
+            if (is_array($this->click)) {
+                $FEvent = (new DefaultOf)->ValueCheck($this->click['event'] ?? null, 'click');
+                $FElement = (new DefaultOf)->ValueCheck($this->click[0] ?? null, null);
+                if (is_null($FElement)) $FElement = (new DefaultOf)->ValueCheck($this->click['element'] ?? null, null);
+                if (is_null($FElement)) $FElement = (new DefaultOf)->ValueCheck($this->click['target'] ?? null, null);
+            } else {
+                $FEvent = 'click';
+                $FElement = $this->click;
+            }
+            if (isset($FElement, $FEvent)) {
+                // submit code
+                $FPjax = CH_FREE;
+                if ($this->pjax) {
+                    if (is_array($this->pjax)) {
+                        foreach ($this->pjax as $FValue) {
+                            if (empty($FPjax)) $FPjax = "$.pjax.reload({container: '#$FValue', async: false})pjax_end"; else $FPjax = (new StrOf)->Replace($FPjax, 'pjax_end', ".done(function() { $.pjax.reload({container: '#$FValue', async: false})pjax_end });");
+                        }
+                        $FPjax = (new StrOf)->Replace($FPjax, 'pjax_end', CH_POINT_COMMA);
+                    } else {
+                        $FPjax = "$.pjax.reload({container: '#$this->pjax', async: false});";
+                    }
+                }
+                $FToken = (new HtmlOf)->GetFormToken(true);
+                $FCode = ["event.preventDefault()",
+                    "var element, el = $(this), elThis = this, formData = {'_csrf': '$FToken', 'modal': '$this->name', status: 'submit'}",
+                    "if (this.hasAttribute('id') == false) { this.setAttribute('id', Math.random().toString(36).substr(2, 9)); }",
+                    "var this_attr = {content: this.textContent.trim()}",
+                    "$.each(this.attributes, function(index, attr) {
+                                this_attr[attr.name] = attr.value.trim();
+                           } ); ",
+                    "formData['this'] = this_attr",
+                    "var data_attr = {}",
+                    "data_attr[ValueCheck(this_attr.name, 'value')] = el.val().trim()",
+                    "if (el.is('select')) data_attr['selected'] = el.find('option:selected').text().trim()"];
+                if (isset($this->default) and is_array($this->default)) {
+                    $FCode[] = "var fkey, fvalue";
+                    foreach ($this->default as $FKey => $FValue) {
+                        $FCode[] = "fkey = '$FKey'; fvalue = '$FValue';
+                                    if (fkey != '' && fvalue != '') {
+                                        fvalue = fvalue.split(',');
+                                        if (fvalue[0][0] == '#' || fvalue[0][0] == '.' || fvalue[0][0] == '[') data_attr[fkey] = GetElementValue($(fvalue[0]), fvalue[1]); else data_attr[fkey] = fvalue[0]; 
+                                    }";
+                    }
+                }
+                if ($this->data) $FCode[] = "formData['data'] = data_attr"; else $FCode[] = "formData = ObjectMerge(formData, data_attr)";
+                if ((new StrOf)->Found($this->method, ['location', 'url', 'reload', 'redirect'])) {
+                    if (is_array($this->fields)) {
+                        $FLocation = CH_FREE;
+                        foreach ($this->fields as $FKey => $FValue) {
+                            $FLocation .= "'" . $FKey . CH_EQUAL . "' + formData." . $FValue;
+                        }
+                        if (!empty($FLocation)) {
+                             $FCode[] = "location.href = '" . $this->action . CH_QUESTION . "' + " . $FLocation;
+                        }
+                    }
+                } else $FCode[] =
+                    "$.ajax({
+                        url: '$this->action', 
+                        type: '$this->method', 
+                        data: formData,
+                        " . ((isset($this->loader)) ? "
+                        beforeSend: function() {
+                          $('$this->loader').show();
+                        }, " : CH_FREE) . "                     
+                        success: function (data) {
+                            " . ((isset($this->loader)) ? "
+                            $('$this->loader').hide();
+                            " : CH_FREE) . $FPjax . "
+                            if (". (($this->success) ? "!data || (data == 0)" : "true") .") {
+                                return false;
+                            }
+                            if (". (($this->refresh) ? "true" : "data == 1") .") {
+                                document.location.reload(true);
+                                return false;
+                            }
+                            try {
+                                var fdata = JSON.parse(data);
+                            } catch (error) {
+                                alert(error);
+                                return false;
+                            }                        
+                            if (isset(fdata.id)) {                            
+                                element = null;
+                                if (fdata.id == 'this') element = elThis; 
+                                else if (fdata.id == 'parent') element = elThis.parentNode;
+                                element = element ? element : document.querySelector('[name=\''+fdata.id+'\']');
+                                element = element ? element : document.querySelector(fdata.id);
+                                if (element) {                                
+                                    if (!fdata.click) {
+                                        var elem = $('[name=\''+fdata.id+'\'], '+fdata.id);                                   
+                                        elem.unbind('click');                                
+                                    }
+                                    if (fdata.html) element.innerHTML = fdata.html;
+                                    if (fdata.value) element.setAttribute('value', fdata.value);
+                                }
+                            }
+                            if (Object.keys(fdata).length > 0) {
+                                for (const item in fdata) {
+                                    if (isset(fdata[item].id)) {
+                                        element = null;
+                                        if (fdata[item].id == 'this') element = elThis; 
+                                        else if (fdata[item].id == 'parent') element = elThis.parentNode;
+                                        element = element ? element : document.querySelector('[name=\''+fdata[item].id+'\']');
+                                        element = element ? element : document.querySelector(fdata[item].id);
+                                        if (element) {
+                                            if (!fdata[item].click) {
+                                                var elem = $('[name=\''+fdata[item].id+'\'], '+fdata[item].id);                                   
+                                                elem.unbind('click');
+                                            }
+                                            if (fdata[item].html) element.innerHTML = fdata[item].html;
+                                            if (fdata[item].value) element.setAttribute('value', fdata[item].value);
+                                        }                                
+                                    }
+                                }
+                            }                           
+                            if (isset(fdata.click)) {
+                                const clickEl = '#' + fdata.click + ',' + fdata.click;
+                                $(clickEl).click();
+                            } else if (fdata.message) {
+                                alert(fdata.message);
+                            }
+                            if (fdata.url) {
+                                location.href = fdata.url;
+                            } else if (fdata.refresh) {
+                                document.location.reload(true);                        
+                            }
+                            return false; 
+                        },
+                        error: function(xhr, textStatus, error){
+                            " . ((isset($this->loader)) ? "
+                            $('$this->loader').hide();
+                            " : CH_FREE) . "                     
+                            alert(xhr.responseText);
+    //                        debugger;
+                        }
+                    })";
+                // click and submit event
+                (new HtmlOf)->CreateJsFunction($FElement, $FEvent, $FCode, ['event' => 'arg']);
+            }
+        }
+    }
+
     private function renderJS($AID) {
         if(isset($this->jsOptions['click'])) {
             // submit code
             if ($this->empty) $FEmpty = "find(':input').filter(function () { return $.trim(this.value).length > 0 })."; else $FEmpty = CH_FREE;
+            $FPjax = CH_FREE;
+            if ($this->pjax) {
+                if (is_array($this->pjax)) {
+                    foreach ($this->pjax as $FValue) {
+                        if (empty($FPjax)) $FPjax = "$.pjax.reload({container: '#$FValue', async: false})pjax_end"; else $FPjax = (new StrOf)->Replace($FPjax, 'pjax_end', ".done(function() { $.pjax.reload({container: '#$FValue', async: false})pjax_end });");
+                    }
+                    $FPjax = (new StrOf)->Replace($FPjax, 'pjax_end', CH_POINT_COMMA);
+                } else {
+                    $FPjax = "$.pjax.reload({container: '#$this->pjax', async: false});";
+                }
+            }
             $FCodeSubmit = ["event.preventDefault()",
-                "var form = $('#$AID-content, #$AID-content form, #$AID-content div')",
-                "const formSerialize = form.". $FEmpty ."serializeJSON(), formData = {'_csrf': formSerialize._csrf, status: 'submit', this: formSerialize.this}",
+                "var element, elThis = this, form = $('#$AID-content, #$AID-content form, #$AID-content div'), fd = new FormData()",
+                "var formSerialize = form.". $FEmpty ."serializeJSON(), formData = {'_csrf': formSerialize._csrf, 'modal': '$this->name', status: 'submit', this: formSerialize.this}",
                 "delete formSerialize._csrf; delete formSerialize.this",
-                "form.children('input[type=file]').each(function () { if (this.value.trim().length > 0) {formSerialize[this.name]=this.value;} })",
-                "formData.data = formSerialize",
-//                "$.each(this.attributes, function (index, attribute) { if (attribute.value.trim().length !== 0) {formData[attribute.name] = attribute.value;} })",
-//                "$.post('$this->action', {status: 'submit', data: formData})",
-                "$.ajax({
+                "form.children('input[type=file]').each(function () { if (this.value.trim().length > 0) {
+                        var filesLength = this.files.length;
+                        if (this.hasAttribute('multiple')) {
+                            var files = {};
+                            for (var i = 0; i < filesLength; i++) { 
+                                files[i] =this.files[i].name; 
+                            }
+                            formSerialize[this.name] = files;
+                        } else formSerialize[this.name]=this.value;
+                    } 
+                })"];
+            if ($this->data) $FCodeSubmit[] = "formData.data = formSerialize"; else $FCodeSubmit[] = "formData = ObjectMerge(formData, formSerialize)";
+            $FCodeSubmit[] = "AppendFormData(fd, formData)";
+            $FCodeSubmit[] = "form.children('input[type=file]').each(function () { if (this.value.trim().length > 0) { 
+                        var filesLength = this.files.length;
+                        if (this.hasAttribute('multiple')) {
+                            for (var i = 0; i < filesLength; i++) { 
+                                fd.append(this.name+'[]',this.files[i]); 
+                            }                        
+                        } else fd.append(this.name,this.files[0]); 
+                   } 
+                })";
+            $FCodeSubmit[] = "$.ajax({
                     url: '$this->action', 
-                    type: '$this->method', 
-                    data: formData,
+                    type: '$this->method',
+                     
+//                    enctype: 'multipart/form-data',
+//                    dataType: 'json',
+//                    cache: false,
+                    contentType: false,
+                    processData:false,
+                    data: fd,
+                    
+//                    data: formData,
                     " . ((isset($this->loader)) ? "
                     beforeSend: function() {
                       $('$this->loader').show();
@@ -943,26 +1167,29 @@ class ModalOf extends \yii\base\Widget {
                     success: function (data) {
                         " . ((isset($this->loader)) ? "
                         $('$this->loader').hide();
-                        " : CH_FREE) . "
-                        if (!data || (data == 0)) {
+                        " : CH_FREE) . $FPjax . "
+                        if (". (($this->success) ? "!data || (data == 0)" : "true") .") {
                             $('#$AID-content').trigger('reset');
                             return false;
                         }
-                        if (data == 1) {
+                        if (". (($this->refresh) ? "true" : "data == 1") .") {
                             document.location.reload(true);
                             $('#$AID-content').trigger('reset');
                             return false;
                         }
                         try {
-                            const fdata = JSON.parse(data);
+                            var fdata = JSON.parse(data);
                         } catch (error) {
                             alert(error);
                             $('#$AID-content').trigger('reset');
                             return false;
                         }
-                        if (fdata.id) {
-                            var element = document.querySelector('[name=\''+fdata[item].id+'\']');
-                            element = element ? element : document.querySelector(fdata[item].id);
+                        if (isset(fdata.id)) {
+                            element = null;
+                            if (fdata.id == 'this') element = elThis; 
+                            else if (fdata.id == 'parent') element = elThis.parentNode;
+                            element = element ? element : document.querySelector('[name=\''+fdata.id+'\']');
+                            element = element ? element : document.querySelector(fdata.id);
                             if (element) {
                                 if (!fdata.click) {
                                     var elem = $('[name=\''+fdata.id+'\'], '+fdata.id);                                   
@@ -974,8 +1201,11 @@ class ModalOf extends \yii\base\Widget {
                         }
                         if (Object.keys(fdata).length > 0) {
                             for (const item in fdata) {
-                                if (fdata[item].id) {
-                                    var element = document.querySelector('[name=\''+fdata[item].id+'\']');
+                                if (isset(fdata[item].id)) {
+                                    element = null;
+                                    if (fdata[item].id == 'this') element = elThis; 
+                                    else if (fdata[item].id == 'parent') element = elThis.parentNode;
+                                    element = element ? element : document.querySelector('[name=\''+fdata[item].id+'\']');
                                     element = element ? element : document.querySelector(fdata[item].id);
                                     if (element) {
                                         if (!fdata[item].click) {
@@ -988,7 +1218,10 @@ class ModalOf extends \yii\base\Widget {
                                 }
                             }
                         }
-                        if (fdata.message) {
+                        if (isset(fdata.click)) {
+                            const clickEl = '#' + fdata.click + ',' + fdata.click;
+                            $(clickEl).click();
+                        } else if (fdata.message) {
                             alert(fdata.message);
                         }                        
                         if (fdata.url) {
@@ -1002,20 +1235,26 @@ class ModalOf extends \yii\base\Widget {
                     error: function(xhr, textStatus, error){
                         " . ((isset($this->loader)) ? "
                         $('$this->loader').hide();
-                        " : CH_FREE) . "                     
+                        " : CH_FREE) . " 
+                        $('#$AID-content').trigger('reset');" .
+                        (($this->success) ? "" : "return false;") . "
+                        if (". (($this->refresh) ? "true" : "false") .") {
+                            document.location.reload(true);
+                            return false;
+                        }
                         alert(xhr.responseText);
-                        $('#$AID-content').trigger('reset');
+                        return false;
 //                        debugger;
                     }
-                })",
-                "$('#$AID-close').click()"];
+                })";
+            $FCodeSubmit[] = "$('#$AID-close').click()";
             $FCodeSubmitStr = ALGOL::ArrayOf()->ToString($FCodeSubmit, CH_POINT_COMMA);
             // show click
             $FCode = ["event.preventDefault();"]; //dataType: 'json',
             $FCode[] = "document.querySelectorAll('.$AID-remove').forEach(el => el.remove())";
             $FCode[] = "if (this.hasAttribute('id') == false) { this.setAttribute('id', Math.random().toString(36).substr(2, 9)); }";
             if ($this->jsOptions['body']['content']) $FCode[] = "
-                var showData = {_csrf: document.getElementById('$AID-content').elements['_csrf'].value, status: 'content'};
+                var showData = {_csrf: document.getElementById('$AID-content').elements['_csrf'].value, 'modal': '$this->name', status: 'content'};
                 var addData = '<input type=\'hidden\' name=\'_csrf\' value=\''+showData._csrf+'\'>';
                 addData += '<input type=\'hidden\' name=\'this[content]\' value=\''+this.textContent.trim()+'\' class=\'$AID-remove\' />';
                 var this_attr = {content: this.textContent.trim()};
@@ -1070,14 +1309,18 @@ class ModalOf extends \yii\base\Widget {
                                 var el = elements[value.name];
                                 if (el) el.setAttribute(value.event, 'fields(this)');
                            });";
-                $FCode2 = ["var formData = {_csrf: document.getElementById('$AID-content').elements['_csrf'].value, status: 'fields', data: el.value}",
-                    "var this_attr = {}",
+                $FCode2 = ["var formData = {_csrf: document.getElementById('$AID-content').elements['_csrf'].value, 'modal': '$this->name', status: 'fields'}",
+                    "var element, this_attr = {}",
                     "if (el.hasAttribute('id') == false) { el.setAttribute('id', Math.random().toString(36).substr(2, 9)); }",
                     "$.each(el.attributes, function(index, attr) {
                                 this_attr[attr.name] = attr.value.trim();
                            } ); ",
                     "formData['this'] = this_attr",
-                    "$.ajax({
+                    "var data_attr = {}, thisEl = $(el)",
+                    "data_attr[ValueCheck(this_attr.name, 'value')] = Trim(thisEl.val())",
+                    "if (thisEl.is('select')) data_attr['selected'] = Trim(thisEl.find('option:selected').text())"];
+                if ($this->data) $FCode2[] = "formData['data'] = data_attr"; else $FCode2[] = "formData = ObjectMerge(formData, data_attr)";
+                $FCode2[] = "$.ajax({
                                 url: '$this->action', 
                                 type: '$this->method',
                                 data: formData,
@@ -1089,17 +1332,27 @@ class ModalOf extends \yii\base\Widget {
                                     " . ((isset($this->loader)) ? "
                                     $('$this->loader').hide();
                                     " : CH_FREE) . "                                 
-                                    if (!data) return false;
-                                    const fdata = JSON.parse(data); 
-                                    if (fdata.id) {
-                                        var element = document.querySelector('[name=\''+fdata.id+'\'], '+fdata.id);
+                                    if (". (($this->success) ? "!data || (data == 0)" : "true") .") return false;
+                                    if (". (($this->refresh) ? "true" : "data == 1") .") {
+                                        document.location.reload(true);
+                                        return false;
+                                    }
+                                    var fdata = JSON.parse(data); 
+                                    if (isset(fdata.id)) {
+                                        element = null;
+                                        if (fdata.id == 'this') element = el; 
+                                        else if (fdata.id == 'parent') element = el.parentNode;
+                                        element = element ? element : document.querySelector('[name=\''+fdata.id+'\'], '+fdata.id);
                                         if (element) {
                                             if (fdata.html) element.innerHTML = fdata.html;
                                             if (fdata.value) element.setAttribute('value', fdata.value);
                                         }
                                     } else {
                                         for (const item in fdata) {
-                                            var element = document.querySelector('[name=\''+fdata[item].id+'\'], '+fdata[item].id);
+                                            element = null;
+                                            if (fdata[item].id == 'this') element = el; 
+                                            else if (fdata[item].id == 'parent') element = el.parentNode;
+                                            element = element ? element : document.querySelector('[name=\''+fdata[item].id+'\'], '+fdata[item].id);
                                             if (element) {
                                                 if (fdata[item].html) element.innerHTML = fdata[item].html;
                                                 if (fdata[item].value) element.setAttribute('value', fdata[item].value);
@@ -1115,22 +1368,57 @@ class ModalOf extends \yii\base\Widget {
                                     alert(xhr.responseText);
             //                        debugger;
                                 }                                 
-                           })"
-                ];
+                           })";
                 (new HtmlOf)->CreateJsFunction(null, 'fields', $FCode2, ['el' => 'arg']);
+            }
+            if (isset($this->default) and is_array($this->default)) {
+                $FToken = (new HtmlOf)->GetFormToken(true);
+                $FCode[] = "var value";
+                foreach ($this->default as $FKey => $FValue) {
+                    $FCode[] = "value = '$FValue'";
+                    $FCode[] = "var value_arr = StringToArray(value)";
+                    $FCode[] = "$.each(this.attributes, function(index, attr) {
+                                    if (value_arr.indexOf(attr.name) != -1) value = value.replaceAll(attr.name, attr.value);
+                                });";
+                    $FCode[] = "defaultEl = $('#$AID-form #$FKey,#$AID-form $FKey')";
+                    $FCode[] = "if (isset(defaultEl)) {
+                                    value = value.split(',');
+                                    valueAttr = value[1];
+                                    value = value[0];                    
+                                    if (value == '' || value[0] == '?') {
+                                        value = value.replaceAll('?', '');
+                                        var elData = $(value);
+                                        var formData = {_csrf: '$FToken', modal: '$this->name', status: 'default', this: {value: defaultEl.val(), content: defaultEl.text().trim(), html: defaultEl.html().trim()}, data: {value: GetElementValue(elData, valueAttr), html: elData.html()}};
+                                               
+                                        AjaxPost('$this->action', formData, defaultEl, '$this->method', formData.data.value);
+                                    } else if (defaultEl.is('input')) defaultEl.val(GetElementValue($(value), valueAttr)); else defaultEl.html(GetElementValue($(value), valueAttr));
+                                }";
+                }
+            }
+            if (isset($this->focus)) {
+                $FCode[] = "var focusEl = $('#$this->focus,$this->focus')";
+                $FCode[] = "if (focusEl.is('input')) focusEl.select(); else focusEl.focus()";
             }
             (new HtmlOf)->CreateJsFunction($this->jsOptions['click'], 'click', $FCode, ['event' => 'arg']);
             // submit click
             (new HtmlOf)->CreateJsFunction("#$AID-modal #$this->submit,#$AID-modal :submit", 'click', $FCodeSubmit, ['event' => 'arg']);
             // Dragged
-            $FCode = ["dragElement('$AID-form', '$AID-header')"];
+            $FCode = ["$('#$AID-form').draggable({ handle: '#$AID-header' })"];
             (new HtmlOf)->CreateJsFunction('window', 'load', $FCode);
         }
         if ($this->jsOptions['modal']['window']) {
-            (new HtmlOf)->CreateJsFunction('window', 'click', ["if (event.target.id == '$AID-modal') { $('#$AID-modal').css({display: 'none'}); }"], ['event' => 'arg']);
+            (new HtmlOf)->CreateJsFunction('window', 'click', [
+                "if (event.target.id == '$AID-modal') { 
+                    $('#$AID-modal').css({display: 'none'}); " .
+                    (($this->refresh) ? "document.location.reload(true);" : "") .
+                "}",
+            ], ['event' => 'arg']);
         }
         if ($this->jsOptions['header']['close']) {
-            (new HtmlOf)->CreateJsFunction("$AID-close", 'click', ["$('#$AID-modal').css({display: 'none'})"]);
+            (new HtmlOf)->CreateJsFunction("$AID-close", 'click', [
+                "$('#$AID-modal').css({display: 'none'})",
+                (($this->refresh) ? "document.location.reload(true)" : ""),
+            ]);
         }
         return ;
     }
